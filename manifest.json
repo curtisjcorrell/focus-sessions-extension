@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Focus Sessions",
+  "description": "Locally log why you use sites and how long each tab session lasts.",
+  "version": "0.1.0",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Focus Sessions"
+  },
+  "options_page": "stats.html"
+}

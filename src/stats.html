@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Focus Sessions</title>
+    <link rel="stylesheet" href="stats.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div>
+          <h1>Today</h1>
+          <p id="summary">No time logged yet.</p>
+        </div>
+        <div class="actions">
+          <button id="clearToday" type="button">Clear today</button>
+          <button id="clearAll" type="button">Clear all</button>
+        </div>
+      </header>
+
+      <section class="panel" aria-labelledby="whitelist-title">
+        <div class="section-header">
+          <div>
+            <h2 id="whitelist-title">Whitelisted domains</h2>
+            <p>Domains listed here will not show prompts or appear in analytics.</p>
+          </div>
+        </div>
+        <form id="whitelistForm" class="whitelist-form">
+          <input id="whitelistInput" type="text" placeholder="example.com" autocomplete="off">
+          <button type="submit">Add domain</button>
+        </form>
+        <div id="whitelistEmpty" class="empty small">No whitelisted domains yet.</div>
+        <ul id="whitelistList" class="whitelist-list"></ul>
+      </section>
+
+      <section aria-labelledby="sessions-title">
+        <h2 id="sessions-title">Sessions by domain and purpose</h2>
+        <div id="empty" class="empty">Answer a site prompt, close the tab, then your session will appear here.</div>
+        <table id="table" hidden>
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Purpose</th>
+              <th>Time</th>
+              <th>Sessions</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </section>
+    </main>
+    <script type="module" src="stats.js"></script>
+  </body>
+</html>
