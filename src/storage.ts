@@ -42,10 +42,22 @@ export async function getActiveSession(tabId: number): Promise<ActiveSession | u
   return (await getSessionMap())[String(tabId)];
 }
 
+export async function getActiveSessions(): Promise<ActiveSession[]> {
+  return Object.values(await getSessionMap());
+}
+
+export async function getActiveSessionByDomain(domain: string): Promise<ActiveSession | undefined> {
+  return (await getActiveSessions()).find((session) => session.domain === domain);
+}
+
 export async function setActiveSession(session: ActiveSession): Promise<void> {
   const sessions = await getSessionMap();
   sessions[String(session.tabId)] = session;
   await chrome.storage.session.set({ [ACTIVE_SESSIONS_KEY]: sessions });
+}
+
+export async function hasActiveSessionId(sessionId: string): Promise<boolean> {
+  return (await getActiveSessions()).some((session) => session.id === sessionId);
 }
 
 export async function removeActiveSession(tabId: number): Promise<ActiveSession | undefined> {
