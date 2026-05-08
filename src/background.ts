@@ -1,5 +1,7 @@
 import {
   getActiveSession,
+  getActiveSessionByDomain,
+  hasActiveSessionId,
   getPendingPrompt,
   isWhitelistedDomain,
   removeActiveSession,
@@ -72,6 +74,19 @@ async function handleContentReady(tabId: number, url: string): Promise<void> {
     return;
   }
 
+  const current = await getActiveSession(tabId);
+  if (current?.domain === domain) {
+    return;
+  }
+
+  const reusable = await getActiveSessionByDomain(domain);
+  if (reusable) {
+    await finishSession(tabId);
+    await takePendingPrompt(tabId);
+    await setActiveSession({ ...reusable, tabId });
+    return;
+  }
+
   const pending = await getPendingPrompt(tabId);
   if (pending?.domain === domain) {
     await sendPrompt(tabId, domain);
@@ -94,6 +109,14 @@ async function beginPromptedSession(tabId: number, url: string): Promise<void> {
 
   const current = await getActiveSession(tabId);
   if (current?.domain === domain) {
+    return;
+  }
+
+  const reusable = await getActiveSessionByDomain(domain);
+  if (reusable) {
+    await finishSession(tabId);
+    await takePendingPrompt(tabId);
+    await setActiveSession({ ...reusable, tabId });
     return;
   }
 
@@ -121,6 +144,14 @@ async function startSession(
   fallbackStartedAt = Date.now()
 ): Promise<void> {
   await takePendingPrompt(tabId);
+
+  const reusable = await getActiveSessionByDomain(domain);
+  if (reusable) {
+    await finishSession(tabId);
+    await setActiveSession({ ...reusable, tabId });
+    return;
+  }
+
   const startedAt = fallbackStartedAt;
   await setActiveSession({
     id: crypto.randomUUID(),
@@ -162,6 +193,10 @@ async function finishSession(tabId: number): Promise<void> {
   const pending = session ? undefined : await takePendingPrompt(tabId);
 
   if (!session && !pending) {
+    return;
+  }
+
+  if (session && (await hasActiveSessionId(session.id))) {
     return;
   }
 
@@ -240,8 +275,35 @@ function getDomain(url: string): string | null {
       return null;
     }
 
-    return parsed.hostname.replace(/^www\./i, "");
+    return getBaseDomain(parsed.hostname.replace(/^www\./i, ""));
   } catch {
     return null;
   }
+}
+
+function getBaseDomain(hostname: string): string {
+  const parts = hostname.toLowerCase().split(".").filter(Boolean);
+
+  if (parts.length <= 2 || isIpAddress(hostname)) {
+    return hostname.toLowerCase();
+  }
+
+  const last = parts.at(-1);
+  const secondLast = parts.at(-2);
+  const thirdLast = parts.at(-3);
+
+  if (!last || !secondLast || !thirdLast) {
+    return hostname.toLowerCase();
+  }
+
+  const commonSecondLevelDomains = new Set(["co", "com", "net", "org", "gov", "edu", "ac"]);
+  if (last.length === 2 && commonSecondLevelDomains.has(secondLast)) {
+    return `${thirdLast}.${secondLast}.${last}`;
+  }
+
+  return `${secondLast}.${last}`;
+}
+
+function isIpAddress(hostname: string): boolean {
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) || hostname.includes(":");
 }
