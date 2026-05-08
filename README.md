@@ -5,7 +5,7 @@ A minimal local Chrome extension for lightweight focus accountability.
 ## What It Does
 
 - Prompts on HTTP/HTTPS sites for what you plan to use the site for.
-- Starts timing only after you submit a purpose or click **Skip**.
+- Starts timing only after you submit a purpose.
 - Logs tab sessions locally by domain, purpose, date, and duration.
 - Tracks zero-duration **Early Exit** events when you choose to leave a site instead.
 - Opens a dashboard tab from the extension toolbar button.

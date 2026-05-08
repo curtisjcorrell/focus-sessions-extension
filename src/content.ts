@@ -1,5 +1,6 @@
 let activeOverlay: HTMLElement | null = null;
 let activeKeyboardController: AbortController | null = null;
+const PROMPT_DRAFTS_KEY = "focusPromptDrafts";
 
 interface PurposeRequestMessage {
   type: "focus:get-purpose";
@@ -39,6 +40,13 @@ function showPrompt(domain: string): void {
   trapPageKeyboard();
 
   const input = shadow.querySelector<HTMLInputElement>("textarea");
+  if (input) {
+    void getDraft(domain).then((draft) => {
+      if (activeOverlay === host) {
+        input.value = draft;
+      }
+    });
+  }
   input?.focus();
 }
 
@@ -61,14 +69,12 @@ function createDialog(domain: string): HTMLElement {
   input.rows = 3;
   input.maxLength = 240;
   input.placeholder = "Example: Research a client issue, answer messages, find a reference...";
+  input.addEventListener("input", () => {
+    void setDraft(domain, input.value);
+  });
 
   const actions = document.createElement("div");
   actions.className = "actions";
-
-  const skip = document.createElement("button");
-  skip.type = "button";
-  skip.className = "secondary";
-  skip.textContent = "Skip";
 
   const exit = document.createElement("button");
   exit.type = "button";
@@ -80,7 +86,7 @@ function createDialog(domain: string): HTMLElement {
   submit.className = "primary";
   submit.textContent = "Start session";
 
-  actions.append(skip, exit, submit);
+  actions.append(exit, submit);
   panel.append(title, domainText, input, actions);
   backdrop.append(panel);
 
@@ -102,6 +108,7 @@ function createDialog(domain: string): HTMLElement {
 
     if (event.key === "Enter" && event.ctrlKey) {
       event.preventDefault();
+      void clearDraft(domain);
       sendResult({
         type: "focus:purpose-result",
         purpose: input.value,
@@ -116,16 +123,14 @@ function createDialog(domain: string): HTMLElement {
     });
   }
 
-  skip.addEventListener("click", () => {
-    sendResult({ type: "focus:purpose-result", purpose: "Unspecified", status: "skipped" });
-  });
-
   exit.addEventListener("click", () => {
+    void clearDraft(domain);
     sendEarlyExit({ type: "focus:early-exit" });
   });
 
   panel.addEventListener("submit", (event) => {
     event.preventDefault();
+    void clearDraft(domain);
     sendResult({
       type: "focus:purpose-result",
       purpose: input.value,
@@ -134,6 +139,42 @@ function createDialog(domain: string): HTMLElement {
   });
 
   return backdrop;
+}
+
+async function getDraft(domain: string): Promise<string> {
+  const drafts = await getDraftMap();
+  return drafts[getDraftKey(domain)] ?? "";
+}
+
+async function setDraft(domain: string, value: string): Promise<void> {
+  const drafts = await getDraftMap();
+  const key = getDraftKey(domain);
+
+  if (value) {
+    drafts[key] = value;
+  } else {
+    delete drafts[key];
+  }
+
+  await chrome.storage.session.set({ [PROMPT_DRAFTS_KEY]: drafts });
+}
+
+async function clearDraft(domain: string): Promise<void> {
+  const drafts = await getDraftMap();
+  delete drafts[getDraftKey(domain)];
+  await chrome.storage.session.set({ [PROMPT_DRAFTS_KEY]: drafts });
+}
+
+async function getDraftMap(): Promise<Record<string, string>> {
+  const result = await chrome.storage.session.get(PROMPT_DRAFTS_KEY);
+  const drafts = result[PROMPT_DRAFTS_KEY];
+  return typeof drafts === "object" && drafts !== null && !Array.isArray(drafts)
+    ? (drafts as Record<string, string>)
+    : {};
+}
+
+function getDraftKey(domain: string): string {
+  return domain;
 }
 
 function sendResult(message: PurposeResponseMessage): void {
@@ -224,7 +265,7 @@ function createStyles(): HTMLStyleElement {
       z-index: 2147483647;
       display: grid;
       place-items: center;
-      background: rgba(17, 24, 39, 0.48);
+      background: #f8fafc;
     }
 
     .panel {
