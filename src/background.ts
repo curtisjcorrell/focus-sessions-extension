@@ -1,6 +1,7 @@
 import {
   getActiveSession,
   getActiveSessionByDomain,
+  getActiveSessions,
   hasActiveSessionId,
   getPendingPrompt,
   isWhitelistedDomain,
@@ -142,12 +143,31 @@ async function sendPrompt(tabId: number, domain: string): Promise<void> {
   try {
     await chrome.tabs.sendMessage(tabId, {
       type: "focus:get-purpose",
-      domain
+      domain,
+      activeProjects: await getActiveProjects(domain)
     });
   } catch {
     // Content scripts are unavailable on restricted pages and can be late on fresh loads.
     // Keep the pending prompt so a ready content script can pick it up, or tab close logs it as skipped.
   }
+}
+
+async function getActiveProjects(currentDomain: string): Promise<Array<{ purpose: string; domain: string; startedAt: number }>> {
+  const projects = new Map<string, { purpose: string; domain: string; startedAt: number }>();
+
+  for (const session of await getActiveSessions()) {
+    const purpose = session.purpose.trim();
+    if (!purpose || purpose === "Unspecified" || session.status !== "answered" || session.domain === currentDomain) {
+      continue;
+    }
+
+    const existing = projects.get(purpose);
+    if (!existing || session.startedAt < existing.startedAt) {
+      projects.set(purpose, { purpose, domain: session.domain, startedAt: session.startedAt });
+    }
+  }
+
+  return [...projects.values()].sort((a, b) => a.startedAt - b.startedAt || a.purpose.localeCompare(b.purpose));
 }
 
 async function startSession(

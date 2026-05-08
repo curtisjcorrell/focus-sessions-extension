@@ -5,6 +5,13 @@ const PROMPT_DRAFTS_KEY = "focusPromptDrafts";
 interface PurposeRequestMessage {
   type: "focus:get-purpose";
   domain: string;
+  activeProjects?: ActiveProject[];
+}
+
+interface ActiveProject {
+  purpose: string;
+  domain: string;
+  startedAt: number;
 }
 
 interface PurposeResponseMessage {
@@ -22,12 +29,12 @@ chrome.runtime.onMessage.addListener((message: PurposeRequestMessage) => {
     return;
   }
 
-  showPrompt(message.domain);
+  showPrompt(message.domain, message.activeProjects ?? []);
 });
 
 void chrome.runtime.sendMessage({ type: "focus:content-ready" });
 
-function showPrompt(domain: string): void {
+function showPrompt(domain: string, activeProjects: ActiveProject[]): void {
   activeOverlay?.remove();
 
   const host = document.createElement("div");
@@ -35,7 +42,7 @@ function showPrompt(domain: string): void {
   activeOverlay = host;
 
   const shadow = host.attachShadow({ mode: "closed" });
-  shadow.append(createStyles(), createDialog(domain));
+  shadow.append(createStyles(), createDialog(domain, activeProjects));
   document.documentElement.append(host);
   trapPageKeyboard();
 
@@ -50,7 +57,7 @@ function showPrompt(domain: string): void {
   input?.focus();
 }
 
-function createDialog(domain: string): HTMLElement {
+function createDialog(domain: string, activeProjects: ActiveProject[]): HTMLElement {
   const backdrop = document.createElement("div");
   backdrop.className = "backdrop";
 
@@ -73,6 +80,29 @@ function createDialog(domain: string): HTMLElement {
     void setDraft(domain, input.value);
   });
 
+  const projectSelect = document.createElement("select");
+  projectSelect.name = "activeProject";
+  projectSelect.hidden = activeProjects.length === 0;
+  projectSelect.setAttribute("aria-label", "Active project");
+
+  const emptyProject = document.createElement("option");
+  emptyProject.value = "";
+  emptyProject.textContent = "New purpose";
+  projectSelect.append(emptyProject);
+
+  for (const project of activeProjects) {
+    const option = document.createElement("option");
+    option.value = project.purpose;
+    option.textContent = `${project.purpose} (${project.domain})`;
+    projectSelect.append(option);
+  }
+
+  projectSelect.addEventListener("change", () => {
+    input.value = projectSelect.value;
+    void setDraft(domain, input.value);
+    input.focus();
+  });
+
   const actions = document.createElement("div");
   actions.className = "actions";
 
@@ -87,7 +117,7 @@ function createDialog(domain: string): HTMLElement {
   submit.textContent = "Start session";
 
   actions.append(exit, submit);
-  panel.append(title, domainText, input, actions);
+  panel.append(title, domainText, projectSelect, input, actions);
   backdrop.append(panel);
 
   backdrop.addEventListener("click", (event) => {
@@ -220,8 +250,8 @@ function trapPageKeyboard(): void {
 }
 
 function trapTab(event: KeyboardEvent, panel: HTMLElement): void {
-  const controls = Array.from(panel.querySelectorAll<HTMLElement>("textarea, button")).filter(
-    (control) => !control.hasAttribute("disabled")
+  const controls = Array.from(panel.querySelectorAll<HTMLElement>("select, textarea, button")).filter(
+    (control) => !control.hasAttribute("disabled") && !control.hidden
   );
 
   if (!controls.length) {
@@ -310,7 +340,24 @@ function createStyles(): HTMLStyleElement {
       outline: none;
     }
 
-    textarea:focus {
+    select {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 38px;
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      border: 1px solid #9ca3af;
+      border-radius: 6px;
+      color: #111827;
+      background: #ffffff;
+      font: inherit;
+      font-size: 14px;
+      line-height: 1.4;
+      outline: none;
+    }
+
+    textarea:focus,
+    select:focus {
       border-color: #2563eb;
       box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
     }

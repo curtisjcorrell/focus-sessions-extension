@@ -26,9 +26,16 @@ export interface PendingPrompt {
   domain: string;
 }
 
+export interface ActiveProject {
+  purpose: string;
+  domain: string;
+  startedAt: number;
+}
+
 export interface PurposeRequestMessage {
   type: "focus:get-purpose";
   domain: string;
+  activeProjects: ActiveProject[];
 }
 
 export interface PurposeResponseMessage {
