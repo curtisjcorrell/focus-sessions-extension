@@ -112,6 +112,12 @@ async function beginPromptedSession(tabId: number, url: string): Promise<void> {
     return;
   }
 
+  const pending = await getPendingPrompt(tabId);
+  if (pending?.domain === domain) {
+    await sendPrompt(tabId, domain);
+    return;
+  }
+
   const reusable = await getActiveSessionByDomain(domain);
   if (reusable) {
     await finishSession(tabId);
