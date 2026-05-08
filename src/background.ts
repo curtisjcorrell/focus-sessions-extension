@@ -81,6 +81,13 @@ async function handleContentReady(tabId: number, url: string): Promise<void> {
 
   const reusable = await getActiveSessionByDomain(domain);
   if (reusable) {
+    const pending = await getPendingPrompt(tabId);
+    if (pending?.domain === domain) {
+      await takePendingPrompt(tabId);
+      await setActiveSession({ ...reusable, tabId });
+      return;
+    }
+
     await finishSession(tabId);
     await takePendingPrompt(tabId);
     await setActiveSession({ ...reusable, tabId });
@@ -109,6 +116,12 @@ async function beginPromptedSession(tabId: number, url: string): Promise<void> {
 
   const current = await getActiveSession(tabId);
   if (current?.domain === domain) {
+    return;
+  }
+
+  const pending = await getPendingPrompt(tabId);
+  if (pending?.domain === domain) {
+    await sendPrompt(tabId, domain);
     return;
   }
 

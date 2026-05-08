@@ -42,7 +42,7 @@ function showPrompt(domain: string): void {
   const input = shadow.querySelector<HTMLInputElement>("textarea");
   if (input) {
     void getDraft(domain).then((draft) => {
-      if (activeOverlay === host) {
+      if (activeOverlay === host && !input.value) {
         input.value = draft;
       }
     });
