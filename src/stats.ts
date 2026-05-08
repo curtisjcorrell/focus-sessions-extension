@@ -7,6 +7,7 @@ import {
   removeWhitelistedDomain,
   toDateKey
 } from "./storage.js";
+import { getDashboardTrends, type DomainTrend, type TrendMetric } from "./analytics.js";
 import type { FocusSession } from "./types.js";
 
 interface GroupedSession {
@@ -18,6 +19,13 @@ interface GroupedSession {
 }
 
 const summary = document.querySelector<HTMLParagraphElement>("#summary");
+const todayTotal = document.querySelector<HTMLDivElement>("#todayTotal");
+const todayTrend = document.querySelector<HTMLDivElement>("#todayTrend");
+const weekTotal = document.querySelector<HTMLDivElement>("#weekTotal");
+const weekTrend = document.querySelector<HTMLDivElement>("#weekTrend");
+const domainTrendRows = document.querySelector<HTMLTableSectionElement>("#domainTrendRows");
+const domainTrendTable = document.querySelector<HTMLTableElement>("#domainTrendTable");
+const domainTrendEmpty = document.querySelector<HTMLDivElement>("#domainTrendEmpty");
 const table = document.querySelector<HTMLTableElement>("#table");
 const rows = document.querySelector<HTMLTableSectionElement>("#rows");
 const empty = document.querySelector<HTMLDivElement>("#empty");
@@ -53,6 +61,7 @@ async function render(): Promise<void> {
   const today = toDateKey(Date.now());
   const [allSessions, whitelistedDomains] = await Promise.all([getSessions(), getWhitelistedDomains()]);
   const sessions = allSessions.filter((session) => session.date === today);
+  const trends = getDashboardTrends(allSessions, today);
   const grouped = groupSessions(sessions);
   const totalMs = grouped.reduce((sum, item) => sum + item.durationMs, 0);
   const earlyExits = sessions.filter((session) => session.status === "early-exit").length;
@@ -72,7 +81,34 @@ async function render(): Promise<void> {
   rows.replaceChildren(...grouped.map(createRow));
   table.hidden = grouped.length === 0;
   empty.hidden = grouped.length > 0;
+  renderTrends(trends);
   renderWhitelist(whitelistedDomains);
+}
+
+function renderTrends(trends: ReturnType<typeof getDashboardTrends>): void {
+  if (todayTotal) {
+    todayTotal.textContent = formatDuration(trends.today.currentMs);
+  }
+
+  if (todayTrend) {
+    todayTrend.textContent = formatTrend(trends.today, "yesterday");
+  }
+
+  if (weekTotal) {
+    weekTotal.textContent = formatDuration(trends.week.currentMs);
+  }
+
+  if (weekTrend) {
+    weekTrend.textContent = formatTrend(trends.week, "previous 7 days");
+  }
+
+  if (!domainTrendRows || !domainTrendTable || !domainTrendEmpty) {
+    return;
+  }
+
+  domainTrendRows.replaceChildren(...trends.domains.map(createDomainTrendRow));
+  domainTrendTable.hidden = trends.domains.length === 0;
+  domainTrendEmpty.hidden = trends.domains.length > 0;
 }
 
 function groupSessions(sessions: FocusSession[]): GroupedSession[] {
@@ -121,6 +157,33 @@ function createRow(group: GroupedSession): HTMLTableRowElement {
   return row;
 }
 
+function createDomainTrendRow(trend: DomainTrend): HTMLTableRowElement {
+  const row = document.createElement("tr");
+  const domain = document.createElement("td");
+  const today = document.createElement("td");
+  const dayTrend = document.createElement("td");
+  const week = document.createElement("td");
+  const weekTrend = document.createElement("td");
+  const events = document.createElement("td");
+
+  today.className = "time";
+  week.className = "time";
+  dayTrend.className = "trend";
+  weekTrend.className = "trend";
+
+  domain.textContent = trend.domain;
+  today.textContent = formatDuration(trend.todayMs);
+  dayTrend.textContent = formatTrend({ currentMs: trend.todayMs, previousMs: trend.yesterdayMs }, "yesterday");
+  week.textContent = formatDuration(trend.currentWeekMs);
+  weekTrend.textContent = formatTrend({ currentMs: trend.currentWeekMs, previousMs: trend.previousWeekMs }, "previous 7 days");
+  events.textContent = trend.todayEarlyExits
+    ? `${trend.todayCount} (${trend.todayEarlyExits} exit${trend.todayEarlyExits === 1 ? "" : "s"})`
+    : String(trend.todayCount);
+
+  row.append(domain, today, dayTrend, week, weekTrend, events);
+  return row;
+}
+
 function renderWhitelist(domains: string[]): void {
   if (!whitelistList || !whitelistEmpty) {
     return;
@@ -162,4 +225,20 @@ function formatDuration(durationMs: number): string {
   }
 
   return `${seconds}s`;
+}
+
+function formatTrend(metric: TrendMetric, label: string): string {
+  const deltaMs = metric.currentMs - metric.previousMs;
+
+  if (metric.currentMs === 0 && metric.previousMs === 0) {
+    return `No ${label} data`;
+  }
+
+  if (metric.previousMs === 0) {
+    return metric.currentMs > 0 ? `New vs ${label}` : `Down ${formatDuration(Math.abs(deltaMs))} vs ${label}`;
+  }
+
+  const direction = deltaMs >= 0 ? "Up" : "Down";
+  const percent = Math.round((Math.abs(deltaMs) / metric.previousMs) * 100);
+  return `${direction} ${percent}% vs ${label}`;
 }

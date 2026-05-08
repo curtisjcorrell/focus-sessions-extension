@@ -34,6 +34,40 @@
         <ul id="whitelistList" class="whitelist-list"></ul>
       </section>
 
+      <section aria-labelledby="trends-title">
+        <h2 id="trends-title">Trends</h2>
+        <div class="metric-grid">
+          <article class="metric">
+            <span>Today</span>
+            <strong id="todayTotal">0s</strong>
+            <p id="todayTrend">No yesterday data</p>
+          </article>
+          <article class="metric">
+            <span>Last 7 days</span>
+            <strong id="weekTotal">0s</strong>
+            <p id="weekTrend">No previous 7 days data</p>
+          </article>
+        </div>
+      </section>
+
+      <section aria-labelledby="domain-trends-title">
+        <h2 id="domain-trends-title">Daily summary by domain</h2>
+        <div id="domainTrendEmpty" class="empty">No domain trend data yet.</div>
+        <table id="domainTrendTable" hidden>
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Today</th>
+              <th>Day trend</th>
+              <th>7 days</th>
+              <th>Week trend</th>
+              <th>Today events</th>
+            </tr>
+          </thead>
+          <tbody id="domainTrendRows"></tbody>
+        </table>
+      </section>
+
       <section aria-labelledby="sessions-title">
         <h2 id="sessions-title">Sessions by domain and purpose</h2>
         <div id="empty" class="empty">Answer a site prompt, close the tab, then your session will appear here.</div>
