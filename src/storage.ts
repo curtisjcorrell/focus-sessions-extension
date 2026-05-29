@@ -6,6 +6,7 @@ const PENDING_PROMPTS_KEY = "pendingFocusPrompts";
 const WHITELIST_KEY = "whitelistedDomains";
 const AUTH_EXEMPTIONS_KEY = "authExemptions";
 const CATEGORIES_KEY = "focusCategories";
+const DOMAIN_CATEGORY_DEFAULTS_KEY = "domainCategoryDefaults";
 const RETENTION_DAYS = 90;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -131,6 +132,28 @@ export async function removeCategory(category: string): Promise<void> {
   await chrome.storage.local.set({ [CATEGORIES_KEY]: categories.length ? orderOtherLast(categories) : DEFAULT_CATEGORIES });
 }
 
+export async function getDefaultCategoryForDomain(domain: string): Promise<string | undefined> {
+  const defaults = await getDomainCategoryDefaults();
+  const category = defaults[domain];
+  if (!category) {
+    return undefined;
+  }
+
+  const categories = await getCategories();
+  return categories.some((item) => item.toLowerCase() === category.toLowerCase()) ? category : undefined;
+}
+
+export async function setDefaultCategoryForDomain(domain: string, category: string): Promise<void> {
+  const normalized = normalizeCategory(category);
+  if (!domain || !normalized) {
+    return;
+  }
+
+  const defaults = await getDomainCategoryDefaults();
+  defaults[domain] = normalized;
+  await chrome.storage.local.set({ [DOMAIN_CATEGORY_DEFAULTS_KEY]: defaults });
+}
+
 export async function getWhitelistedDomains(): Promise<string[]> {
   const result = await chrome.storage.local.get(WHITELIST_KEY);
   const domains = result[WHITELIST_KEY];
@@ -236,6 +259,20 @@ async function getPromptMap(): Promise<Record<string, PendingPrompt>> {
   const result = await chrome.storage.session.get(PENDING_PROMPTS_KEY);
   const prompts = result[PENDING_PROMPTS_KEY];
   return isObject(prompts) ? (prompts as Record<string, PendingPrompt>) : {};
+}
+
+async function getDomainCategoryDefaults(): Promise<Record<string, string>> {
+  const result = await chrome.storage.local.get(DOMAIN_CATEGORY_DEFAULTS_KEY);
+  const defaults = result[DOMAIN_CATEGORY_DEFAULTS_KEY];
+  if (!isObject(defaults)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(defaults)
+      .filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
+      .map(([domain, category]) => [domain, normalizeCategory(category)])
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

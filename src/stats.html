@@ -72,13 +72,44 @@
             <span>Today</span>
             <strong id="todayTotal">0s</strong>
             <p id="todayTrend">No yesterday data</p>
+            <p id="briefToday">No visits under 10s</p>
           </article>
           <article class="metric">
             <span>Last 7 days</span>
             <strong id="weekTotal">0s</strong>
             <p id="weekTrend">No previous 7 days data</p>
+            <p id="briefWeek">No visits under 10s</p>
           </article>
         </div>
+      </section>
+
+      <section aria-labelledby="recap-title">
+        <h2 id="recap-title">Yesterday recap</h2>
+        <div id="yesterdayRecap" class="empty small">No recap available for yesterday.</div>
+      </section>
+
+      <section aria-labelledby="notable-title">
+        <h2 id="notable-title">Notable changes</h2>
+        <div id="notableEmpty" class="empty">No meaningful changes yet.</div>
+        <ul id="notableList" class="notable-list"></ul>
+      </section>
+
+      <section aria-labelledby="category-trends-title">
+        <h2 id="category-trends-title">Time by category</h2>
+        <div id="categoryTrendEmpty" class="empty">No category trend data yet.</div>
+        <table id="categoryTrendTable" hidden>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Today</th>
+              <th>Day trend</th>
+              <th>7 days</th>
+              <th>Week trend</th>
+              <th>Today events</th>
+            </tr>
+          </thead>
+          <tbody id="categoryTrendRows"></tbody>
+        </table>
       </section>
 
       <section aria-labelledby="domain-trends-title">

@@ -45,6 +45,7 @@ export interface PromptDetailsResponseMessage {
   domain: string;
   targetUrl: string;
   categories: string[];
+  defaultCategory?: string;
 }
 
 export interface PromptSubmitMessage {
