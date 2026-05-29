@@ -1,11 +1,15 @@
 export type PurposeStatus = "answered" | "skipped" | "early-exit";
 
+export type PendingPromptStatus = "awaiting-selection" | "selected";
+
 export interface FocusSession {
   id: string;
   tabId: number;
   date: string;
   domain: string;
   purpose: string;
+  category?: string;
+  note?: string;
   status: PurposeStatus;
   startedAt: number;
   endedAt: number;
@@ -17,40 +21,43 @@ export interface ActiveSession {
   tabId: number;
   domain: string;
   purpose: string;
+  category?: string;
+  note?: string;
   status: PurposeStatus;
   startedAt: number;
 }
 
 export interface PendingPrompt {
   tabId: number;
+  status: PendingPromptStatus;
+  targetUrl: string;
   domain: string;
-}
-
-export interface ActiveProject {
-  purpose: string;
-  domain: string;
+  category?: string;
+  note?: string;
   startedAt: number;
 }
 
-export interface PurposeRequestMessage {
-  type: "focus:get-purpose";
-  domain: string;
-  activeProjects: ActiveProject[];
+export interface PromptDetailsRequestMessage {
+  type: "focus:get-prompt-details";
 }
 
-export interface PurposeResponseMessage {
-  type: "focus:purpose-result";
-  purpose: string;
-  status: PurposeStatus;
+export interface PromptDetailsResponseMessage {
+  domain: string;
+  targetUrl: string;
+  categories: string[];
+}
+
+export interface PromptSubmitMessage {
+  type: "focus:prompt-submit";
+  category: string;
+  note: string;
 }
 
 export interface EarlyExitMessage {
   type: "focus:early-exit";
 }
 
-export interface ContentReadyMessage {
-  type: "focus:content-ready";
-}
-
-export type ContentMessage = PurposeRequestMessage;
-export type BackgroundMessage = PurposeResponseMessage | EarlyExitMessage | ContentReadyMessage;
+export type BackgroundMessage =
+  | EarlyExitMessage
+  | PromptDetailsRequestMessage
+  | PromptSubmitMessage;
