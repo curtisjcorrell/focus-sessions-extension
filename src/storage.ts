@@ -109,20 +109,18 @@ export async function getPendingPrompt(tabId: number): Promise<PendingPrompt | u
 export async function getCategories(): Promise<string[]> {
   const result = await chrome.storage.local.get(CATEGORIES_KEY);
   const categories = result[CATEGORIES_KEY];
-  const normalized = normalizeStringList(categories, DEFAULT_CATEGORIES);
-  return normalized.some((category) => category.toLowerCase() === "other") ? normalized : [...normalized, "Other"];
+  return normalizeCategories(categories);
 }
 
 export async function addCategory(input: string): Promise<string | null> {
-  const category = input.trim();
+  const category = normalizeCategory(input);
   if (!category) {
     return null;
   }
 
   const categories = await getCategories();
   if (!categories.some((item) => item.toLowerCase() === category.toLowerCase())) {
-    categories.push(category);
-    await chrome.storage.local.set({ [CATEGORIES_KEY]: categories });
+    await chrome.storage.local.set({ [CATEGORIES_KEY]: orderOtherLast([...categories, category]) });
   }
 
   return category;
@@ -130,7 +128,7 @@ export async function addCategory(input: string): Promise<string | null> {
 
 export async function removeCategory(category: string): Promise<void> {
   const categories = (await getCategories()).filter((item) => item !== category);
-  await chrome.storage.local.set({ [CATEGORIES_KEY]: categories.length ? categories : DEFAULT_CATEGORIES });
+  await chrome.storage.local.set({ [CATEGORIES_KEY]: categories.length ? orderOtherLast(categories) : DEFAULT_CATEGORIES });
 }
 
 export async function getWhitelistedDomains(): Promise<string[]> {
@@ -247,6 +245,32 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function normalizeStringList(value: unknown, fallback: string[]): string[] {
   const list = Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "") : fallback;
   return [...new Set(list.map((item) => item.trim()))];
+}
+
+function normalizeCategories(value: unknown): string[] {
+  return orderOtherLast(normalizeStringList(value, DEFAULT_CATEGORIES));
+}
+
+function normalizeCategory(input: string): string {
+  const category = input.trim();
+  return category.toLowerCase() === "other" ? "Other" : category;
+}
+
+function orderOtherLast(categories: string[]): string[] {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+
+  for (const category of categories.map(normalizeCategory)) {
+    const key = category.toLowerCase();
+    if (key === "other" || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    ordered.push(category);
+  }
+
+  return [...ordered, "Other"];
 }
 
 function normalizeDomainInput(input: string): string | null {
