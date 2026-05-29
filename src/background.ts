@@ -1,18 +1,20 @@
 import {
   getActiveSession,
   getActiveSessionByDomain,
-  getActiveSessions,
-  hasActiveSessionId,
+  getCategories,
   getPendingPrompt,
+  hasActiveSessionId,
+  isAuthExemptUrl,
   isWhitelistedDomain,
   removeActiveSession,
   saveSession,
   setActiveSession,
   setPendingPrompt,
   takePendingPrompt,
-  toDateKey
+  toDateKey,
+  updatePendingPrompt
 } from "./storage.js";
-import type { BackgroundMessage, PurposeResponseMessage } from "./types.js";
+import type { BackgroundMessage, FocusSession, PendingPrompt, PromptDetailsResponseMessage, PromptSubmitMessage } from "./types.js";
 
 chrome.action.onClicked.addListener(() => {
   void chrome.tabs.create({ url: chrome.runtime.getURL("stats.html") });
@@ -26,93 +28,67 @@ chrome.runtime.onStartup.addListener(() => {
   void closeAllUnknownSessions();
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === "complete" && tab.url) {
-    void beginPromptedSession(tabId, tab.url);
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+  if (details.frameId !== 0) {
+    return;
   }
+
+  void handleNavigation(details.tabId, details.url);
+});
+
+chrome.webNavigation.onCompleted.addListener((details) => {
+  if (details.frameId !== 0) {
+    return;
+  }
+
+  void maybeStartSelectedSession(details.tabId, details.url);
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void finishSession(tabId);
+  void finishSession(tabId, "closed");
 });
 
-chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender) => {
-  const senderTab = getValidSenderTab(sender);
-  if (!senderTab || !isBackgroundMessage(message)) {
-    return;
+chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
+  const senderTabId = sender.tab?.id;
+  if (senderTabId === undefined || !isBackgroundMessage(message)) {
+    return false;
   }
 
-  if (message.type === "focus:content-ready") {
-    void handleContentReady(senderTab.id, senderTab.url);
-    return;
+  if (message.type === "focus:get-prompt-details") {
+    void getPromptDetails(senderTabId).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "focus:prompt-submit" && isPromptSubmitMessage(message)) {
+    void submitPrompt(senderTabId, message);
+    return false;
   }
 
   if (message.type === "focus:early-exit") {
-    void recordEarlyExit(senderTab.id, senderTab.url);
-    return;
+    void recordEarlyExit(senderTabId);
+    return false;
   }
 
-  if (message.type !== "focus:purpose-result" || !isPurposeResponseMessage(message)) {
-    return;
-  }
-
-  const domain = getDomain(senderTab.url);
-  if (!domain) {
-    return;
-  }
-
-  void startSession(senderTab.id, domain, normalizePurpose(message));
+  return false;
 });
 
-async function handleContentReady(tabId: number, url: string): Promise<void> {
+async function handleNavigation(tabId: number, url: string): Promise<void> {
+  if (isExtensionUrl(url)) {
+    return;
+  }
+
   const domain = getDomain(url);
   if (!domain) {
     return;
   }
 
-  if (await isWhitelistedDomain(domain)) {
-    await finishSession(tabId);
-    return;
-  }
-
-  const current = await getActiveSession(tabId);
-  if (current?.domain === domain) {
-    return;
-  }
-
-  const reusable = await getActiveSessionByDomain(domain);
-  if (reusable) {
-    const pending = await getPendingPrompt(tabId);
-    if (pending?.domain === domain) {
-      await takePendingPrompt(tabId);
-      await setActiveSession({ ...reusable, tabId });
+  const pending = await getPendingPrompt(tabId);
+  if (pending?.status === "selected") {
+    if (domain === pending.domain || (await isAuthExemptUrl(url))) {
       return;
     }
 
-    await finishSession(tabId);
     await takePendingPrompt(tabId);
-    await setActiveSession({ ...reusable, tabId });
-    return;
-  }
-
-  const pending = await getPendingPrompt(tabId);
-  if (pending?.domain === domain) {
-    await sendPrompt(tabId, domain);
-    return;
-  }
-
-  await beginPromptedSession(tabId, url);
-}
-
-async function beginPromptedSession(tabId: number, url: string): Promise<void> {
-  const domain = getDomain(url);
-  if (!domain) {
-    return;
-  }
-
-  if (await isWhitelistedDomain(domain)) {
-    await finishSession(tabId);
-    return;
   }
 
   const current = await getActiveSession(tabId);
@@ -120,108 +96,114 @@ async function beginPromptedSession(tabId: number, url: string): Promise<void> {
     return;
   }
 
-  const pending = await getPendingPrompt(tabId);
-  if (pending?.domain === domain) {
-    await sendPrompt(tabId, domain);
+  if (await isWhitelistedDomain(domain)) {
+    await finishSession(tabId, "navigated");
+    return;
+  }
+
+  if (await isAuthExemptUrl(url)) {
+    await finishSession(tabId, "navigated");
     return;
   }
 
   const reusable = await getActiveSessionByDomain(domain);
   if (reusable) {
-    await finishSession(tabId);
-    await takePendingPrompt(tabId);
+    await finishSession(tabId, "navigated");
     await setActiveSession({ ...reusable, tabId });
     return;
   }
 
-  await finishSession(tabId);
-  await setPendingPrompt({ tabId, domain });
-  await sendPrompt(tabId, domain);
-}
-
-async function sendPrompt(tabId: number, domain: string): Promise<void> {
-  try {
-    await chrome.tabs.sendMessage(tabId, {
-      type: "focus:get-purpose",
-      domain,
-      activeProjects: await getActiveProjects(domain)
-    });
-  } catch {
-    // Content scripts are unavailable on restricted pages and can be late on fresh loads.
-    // Keep the pending prompt so a ready content script can pick it up, or tab close logs it as skipped.
-  }
-}
-
-async function getActiveProjects(currentDomain: string): Promise<Array<{ purpose: string; domain: string; startedAt: number }>> {
-  const projects = new Map<string, { purpose: string; domain: string; startedAt: number }>();
-
-  for (const session of await getActiveSessions()) {
-    const purpose = session.purpose.trim();
-    if (!purpose || purpose === "Unspecified" || session.status !== "answered" || session.domain === currentDomain) {
-      continue;
-    }
-
-    const existing = projects.get(purpose);
-    if (!existing || session.startedAt < existing.startedAt) {
-      projects.set(purpose, { purpose, domain: session.domain, startedAt: session.startedAt });
-    }
+  if (pending?.status === "awaiting-selection" && pending.domain === domain) {
+    await showInterstitial(tabId);
+    return;
   }
 
-  return [...projects.values()].sort((a, b) => a.startedAt - b.startedAt || a.purpose.localeCompare(b.purpose));
+  await finishSession(tabId, "navigated");
+  await setPendingPrompt({
+    tabId,
+    status: "awaiting-selection",
+    targetUrl: url,
+    domain,
+    startedAt: Date.now()
+  });
+  await showInterstitial(tabId);
 }
 
-async function startSession(
-  tabId: number,
-  domain: string,
-  result: Pick<PurposeResponseMessage, "purpose" | "status">,
-  fallbackStartedAt = Date.now()
-): Promise<void> {
+async function showInterstitial(tabId: number): Promise<void> {
+  await chrome.tabs.update(tabId, { url: chrome.runtime.getURL("prompt.html") });
+}
+
+async function getPromptDetails(tabId: number): Promise<PromptDetailsResponseMessage | null> {
+  const pending = await getPendingPrompt(tabId);
+  if (!pending) {
+    return null;
+  }
+
+  return {
+    domain: pending.domain,
+    targetUrl: pending.targetUrl,
+    categories: await getCategories()
+  };
+}
+
+async function submitPrompt(tabId: number, message: PromptSubmitMessage): Promise<void> {
+  const pending = await getPendingPrompt(tabId);
+  if (!pending) {
+    return;
+  }
+
+  const category = message.category.trim();
+  const note = message.note.trim();
+  const selected: PendingPrompt = {
+    ...pending,
+    status: "selected",
+    category: category || "Other",
+    note,
+    startedAt: Date.now()
+  };
+
+  await updatePendingPrompt(selected);
+  await chrome.tabs.update(tabId, { url: selected.targetUrl });
+}
+
+async function maybeStartSelectedSession(tabId: number, url: string): Promise<void> {
+  const pending = await getPendingPrompt(tabId);
+  const domain = getDomain(url);
+  if (!pending || pending.status !== "selected" || !domain || domain !== pending.domain) {
+    return;
+  }
+
   await takePendingPrompt(tabId);
 
   const reusable = await getActiveSessionByDomain(domain);
   if (reusable) {
-    await finishSession(tabId);
+    await finishSession(tabId, "navigated");
     await setActiveSession({ ...reusable, tabId });
     return;
   }
 
-  const startedAt = fallbackStartedAt;
+  const category = pending.category?.trim() || "Other";
+  const note = pending.note?.trim() ?? "";
+  const purpose = note ? `${category}: ${note}` : category;
+
   await setActiveSession({
     id: crypto.randomUUID(),
     tabId,
     domain,
-    purpose: result.purpose,
-    status: result.status,
-    startedAt
+    purpose,
+    category,
+    note,
+    status: "answered",
+    startedAt: Date.now()
   });
 }
 
-async function recordEarlyExit(tabId: number, url: string): Promise<void> {
-  const domain = getDomain(url);
-  if (!domain) {
-    return;
-  }
-
-  const existing = await removeActiveSession(tabId);
-  const pending = await takePendingPrompt(tabId);
-  const timestamp = existing?.startedAt ?? Date.now();
-
-  await saveSession({
-    id: crypto.randomUUID(),
-    tabId,
-    date: toDateKey(timestamp),
-    domain: pending?.domain ?? domain,
-    purpose: "Early Exit",
-    status: "early-exit",
-    startedAt: timestamp,
-    endedAt: Date.now(),
-    durationMs: 0
-  });
-
+async function recordEarlyExit(tabId: number): Promise<void> {
+  await saveEarlyExit(tabId);
   await chrome.tabs.remove(tabId);
 }
 
-async function finishSession(tabId: number): Promise<void> {
+async function finishSession(tabId: number, reason: "closed" | "navigated"): Promise<void> {
   const session = await removeActiveSession(tabId);
   const pending = session ? undefined : await takePendingPrompt(tabId);
 
@@ -233,22 +215,51 @@ async function finishSession(tabId: number): Promise<void> {
     return;
   }
 
+  if (!session && pending && reason === "closed") {
+    await saveEarlyExit(tabId, pending);
+    return;
+  }
+
+  if (!session) {
+    return;
+  }
+
   const endedAt = Date.now();
-  const finished = session ?? {
+  await saveSession({
+    ...session,
+    date: toDateKey(session.startedAt),
+    endedAt,
+    durationMs: Math.max(0, endedAt - session.startedAt)
+  });
+}
+
+async function saveEarlyExit(tabId: number, knownPending?: PendingPrompt): Promise<void> {
+  const existing = await removeActiveSession(tabId);
+  const pending = knownPending ?? (existing ? undefined : await takePendingPrompt(tabId));
+  const timestamp = existing?.startedAt ?? pending?.startedAt ?? Date.now();
+  const category = existing?.category ?? pending?.category;
+  const note = existing?.note ?? pending?.note;
+  const session: FocusSession = {
     id: crypto.randomUUID(),
     tabId,
-    domain: pending?.domain ?? "unknown",
-    purpose: "Unspecified",
-    status: "skipped" as const,
-    startedAt: endedAt
+    date: toDateKey(timestamp),
+    domain: existing?.domain ?? pending?.domain ?? "unknown",
+    purpose: "Early Exit",
+    status: "early-exit",
+    startedAt: timestamp,
+    endedAt: Date.now(),
+    durationMs: 0
   };
 
-  await saveSession({
-    ...finished,
-    date: toDateKey(finished.startedAt),
-    endedAt,
-    durationMs: Math.max(0, endedAt - finished.startedAt)
-  });
+  if (category) {
+    session.category = category;
+  }
+
+  if (note) {
+    session.note = note;
+  }
+
+  await saveSession(session);
 }
 
 async function closeAllUnknownSessions(): Promise<void> {
@@ -263,25 +274,9 @@ async function closeAllUnknownSessions(): Promise<void> {
 
   for (const tabId of Object.keys(sessions).map(Number)) {
     if (!liveTabIds.has(tabId)) {
-      void finishSession(tabId);
+      void finishSession(tabId, "closed");
     }
   }
-}
-
-function normalizePurpose(message: PurposeResponseMessage): Pick<PurposeResponseMessage, "purpose" | "status"> {
-  const trimmed = message.purpose.trim();
-  return {
-    purpose: trimmed || "Unspecified",
-    status: message.status
-  };
-}
-
-function getValidSenderTab(sender: chrome.runtime.MessageSender): { id: number; url: string } | null {
-  if (sender.tab?.id === undefined || !sender.tab.url || !getDomain(sender.tab.url)) {
-    return null;
-  }
-
-  return { id: sender.tab.id, url: sender.tab.url };
 }
 
 function isBackgroundMessage(message: unknown): message is BackgroundMessage {
@@ -290,15 +285,15 @@ function isBackgroundMessage(message: unknown): message is BackgroundMessage {
   }
 
   const type = (message as { type: unknown }).type;
-  return type === "focus:content-ready" || type === "focus:early-exit" || type === "focus:purpose-result";
+  return type === "focus:get-prompt-details" || type === "focus:prompt-submit" || type === "focus:early-exit";
 }
 
-function isPurposeResponseMessage(message: BackgroundMessage): message is PurposeResponseMessage {
-  return (
-    message.type === "focus:purpose-result" &&
-    typeof message.purpose === "string" &&
-    (message.status === "answered" || message.status === "skipped")
-  );
+function isPromptSubmitMessage(message: BackgroundMessage): message is PromptSubmitMessage {
+  return message.type === "focus:prompt-submit" && typeof message.category === "string" && typeof message.note === "string";
+}
+
+function isExtensionUrl(url: string): boolean {
+  return url.startsWith(chrome.runtime.getURL(""));
 }
 
 function getDomain(url: string): string | null {

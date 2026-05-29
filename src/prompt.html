@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Focus Session</title>
+    <link rel="stylesheet" href="prompt.css">
+  </head>
+  <body>
+    <main class="shell">
+      <form id="promptForm" class="panel">
+        <p class="eyebrow">Focus session</p>
+        <h1>What are you here to do?</h1>
+        <p id="domain" class="domain">Loading...</p>
+
+        <fieldset>
+          <legend>Category</legend>
+          <div id="categoryOptions" class="category-grid"></div>
+        </fieldset>
+
+        <label class="note-label" for="note">Note</label>
+        <textarea id="note" rows="3" maxlength="240" placeholder="Optional detail, especially for Other"></textarea>
+
+        <div class="actions">
+          <button id="exit" type="button" class="danger">Exit instead</button>
+          <button type="submit" class="primary">Continue</button>
+        </div>
+      </form>
+    </main>
+    <script type="module" src="prompt.js"></script>
+  </body>
+</html>
