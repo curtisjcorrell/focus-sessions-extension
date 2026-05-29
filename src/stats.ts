@@ -33,6 +33,9 @@ interface GroupedSession {
   earlyExits: number;
 }
 
+const STORAGE_SESSION_NOTICE_THRESHOLD = 5000;
+const STORAGE_BYTES_NOTICE_THRESHOLD = 3 * 1024 * 1024;
+
 const summary = document.querySelector<HTMLParagraphElement>("#summary");
 const todayTotal = document.querySelector<HTMLDivElement>("#todayTotal");
 const todayTrend = document.querySelector<HTMLDivElement>("#todayTrend");
@@ -41,6 +44,9 @@ const weekTrend = document.querySelector<HTMLDivElement>("#weekTrend");
 const briefToday = document.querySelector<HTMLDivElement>("#briefToday");
 const briefWeek = document.querySelector<HTMLDivElement>("#briefWeek");
 const yesterdayRecap = document.querySelector<HTMLDivElement>("#yesterdayRecap");
+const sessionCount = document.querySelector<HTMLDivElement>("#sessionCount");
+const storageUsage = document.querySelector<HTMLDivElement>("#storageUsage");
+const storageNotice = document.querySelector<HTMLDivElement>("#storageNotice");
 const notableList = document.querySelector<HTMLUListElement>("#notableList");
 const notableEmpty = document.querySelector<HTMLDivElement>("#notableEmpty");
 const categoryTrendRows = document.querySelector<HTMLTableSectionElement>("#categoryTrendRows");
@@ -117,11 +123,12 @@ void render();
 
 async function render(): Promise<void> {
   const today = toDateKey(Date.now());
-  const [allSessions, whitelistedDomains, categories, authExemptions] = await Promise.all([
+  const [allSessions, whitelistedDomains, categories, authExemptions, storageBytes] = await Promise.all([
     getSessions(),
     getWhitelistedDomains(),
     getCategories(),
-    getAuthExemptions()
+    getAuthExemptions(),
+    getLocalStorageBytesInUse()
   ]);
   const sessions = allSessions.filter((session) => session.date === today);
   const trends = getDashboardTrends(allSessions, today);
@@ -149,11 +156,35 @@ async function render(): Promise<void> {
   empty.hidden = grouped.length > 0;
   renderTrends(trends);
   renderYesterdayRecap(trends.yesterday);
+  renderStorageHealth(allSessions.length, storageBytes);
   renderNotableChanges(trends.notableChanges);
   renderCategoryTrends(trends.categories);
   renderWhitelist(whitelistedDomains);
   renderCategories(categories);
   renderAuthExemptions(authExemptions);
+}
+
+function renderStorageHealth(sessions: number, bytesInUse: number | null): void {
+  if (sessionCount) {
+    sessionCount.textContent = sessions.toLocaleString();
+  }
+
+  if (storageUsage) {
+    storageUsage.textContent = bytesInUse === null ? "Unknown" : formatBytes(bytesInUse);
+  }
+
+  if (!storageNotice) {
+    return;
+  }
+
+  const overSessionThreshold = sessions >= STORAGE_SESSION_NOTICE_THRESHOLD;
+  const overStorageThreshold = bytesInUse !== null && bytesInUse >= STORAGE_BYTES_NOTICE_THRESHOLD;
+
+  storageNotice.hidden = !overSessionThreshold && !overStorageThreshold;
+  if (!storageNotice.hidden) {
+    storageNotice.textContent =
+      "Storage is getting large. If the dashboard starts feeling slow, the next levers are daily aggregates and background config caching.";
+  }
 }
 
 function renderTrends(trends: ReturnType<typeof getDashboardTrends>): void {
@@ -498,4 +529,24 @@ function formatBriefCount(count: number): string {
 function formatSignedDuration(durationMs: number): string {
   const sign = durationMs >= 0 ? "+" : "-";
   return `${sign}${formatDuration(Math.abs(durationMs))}`;
+}
+
+async function getLocalStorageBytesInUse(): Promise<number | null> {
+  try {
+    return await chrome.storage.local.getBytesInUse(null);
+  } catch {
+    return null;
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  if (bytes >= 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+
+  return `${bytes} B`;
 }
