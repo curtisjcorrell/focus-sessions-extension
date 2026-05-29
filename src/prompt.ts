@@ -21,7 +21,7 @@ async function init(): Promise<void> {
     domain.textContent = details.domain;
   }
 
-  renderCategories(details.categories);
+  renderCategories(details.categories, details.defaultCategory);
 }
 
 form?.addEventListener("submit", (event) => {
@@ -42,12 +42,17 @@ exit?.addEventListener("click", () => {
   void chrome.runtime.sendMessage({ type: "focus:early-exit" });
 });
 
-function renderCategories(categories: string[]): void {
+function renderCategories(categories: string[], defaultCategory?: string): void {
   if (!categoryOptions) {
     return;
   }
 
-  categoryOptions.replaceChildren(...categories.map((category, index) => createCategoryOption(category, index === 0)));
+  const defaultIndex = defaultCategory
+    ? categories.findIndex((category) => category.toLowerCase() === defaultCategory.toLowerCase())
+    : -1;
+  const checkedIndex = defaultIndex >= 0 ? defaultIndex : 0;
+
+  categoryOptions.replaceChildren(...categories.map((category, index) => createCategoryOption(category, index === checkedIndex)));
 }
 
 function createCategoryOption(category: string, checked: boolean): HTMLLabelElement {
@@ -77,6 +82,7 @@ function isPromptDetails(value: unknown): value is PromptDetailsResponseMessage 
     value !== null &&
     typeof (value as { domain?: unknown }).domain === "string" &&
     typeof (value as { targetUrl?: unknown }).targetUrl === "string" &&
-    Array.isArray((value as { categories?: unknown }).categories)
+    Array.isArray((value as { categories?: unknown }).categories) &&
+    (!("defaultCategory" in value) || typeof (value as { defaultCategory?: unknown }).defaultCategory === "string")
   );
 }

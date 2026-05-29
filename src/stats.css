@@ -201,6 +201,39 @@ input:focus {
   line-height: 1.35;
 }
 
+.notable-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notable-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.notable-list strong {
+  color: #374151;
+  font-size: 13px;
+}
+
+.notable-list span:last-child {
+  color: #4b5563;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -264,5 +297,10 @@ tr:last-child td {
 
   .metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .notable-list li {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }

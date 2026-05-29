@@ -2,12 +2,14 @@ import {
   getActiveSession,
   getActiveSessionByDomain,
   getCategories,
+  getDefaultCategoryForDomain,
   getPendingPrompt,
   hasActiveSessionId,
   isAuthExemptUrl,
   isWhitelistedDomain,
   removeActiveSession,
   saveSession,
+  setDefaultCategoryForDomain,
   setActiveSession,
   setPendingPrompt,
   takePendingPrompt,
@@ -139,11 +141,19 @@ async function getPromptDetails(tabId: number): Promise<PromptDetailsResponseMes
     return null;
   }
 
-  return {
+  const [categories, defaultCategory] = await Promise.all([getCategories(), getDefaultCategoryForDomain(pending.domain)]);
+
+  const response: PromptDetailsResponseMessage = {
     domain: pending.domain,
     targetUrl: pending.targetUrl,
-    categories: await getCategories()
+    categories
   };
+
+  if (defaultCategory) {
+    response.defaultCategory = defaultCategory;
+  }
+
+  return response;
 }
 
 async function submitPrompt(tabId: number, message: PromptSubmitMessage): Promise<void> {
@@ -163,6 +173,7 @@ async function submitPrompt(tabId: number, message: PromptSubmitMessage): Promis
   };
 
   await updatePendingPrompt(selected);
+  await setDefaultCategoryForDomain(pending.domain, selected.category ?? "Other");
   await chrome.tabs.update(tabId, { url: selected.targetUrl });
 }
 

@@ -13,7 +13,15 @@ import {
   removeWhitelistedDomain,
   toDateKey
 } from "./storage.js";
-import { getDashboardTrends, type DomainTrend, type TrendMetric } from "./analytics.js";
+import {
+  BRIEF_SESSION_THRESHOLD_MS,
+  getDashboardTrends,
+  isBriefSession,
+  type CategoryTrend,
+  type DomainTrend,
+  type NotableChange,
+  type TrendMetric
+} from "./analytics.js";
 import type { FocusSession } from "./types.js";
 
 interface GroupedSession {
@@ -30,6 +38,14 @@ const todayTotal = document.querySelector<HTMLDivElement>("#todayTotal");
 const todayTrend = document.querySelector<HTMLDivElement>("#todayTrend");
 const weekTotal = document.querySelector<HTMLDivElement>("#weekTotal");
 const weekTrend = document.querySelector<HTMLDivElement>("#weekTrend");
+const briefToday = document.querySelector<HTMLDivElement>("#briefToday");
+const briefWeek = document.querySelector<HTMLDivElement>("#briefWeek");
+const yesterdayRecap = document.querySelector<HTMLDivElement>("#yesterdayRecap");
+const notableList = document.querySelector<HTMLUListElement>("#notableList");
+const notableEmpty = document.querySelector<HTMLDivElement>("#notableEmpty");
+const categoryTrendRows = document.querySelector<HTMLTableSectionElement>("#categoryTrendRows");
+const categoryTrendTable = document.querySelector<HTMLTableElement>("#categoryTrendTable");
+const categoryTrendEmpty = document.querySelector<HTMLDivElement>("#categoryTrendEmpty");
 const domainTrendRows = document.querySelector<HTMLTableSectionElement>("#domainTrendRows");
 const domainTrendTable = document.querySelector<HTMLTableElement>("#domainTrendTable");
 const domainTrendEmpty = document.querySelector<HTMLDivElement>("#domainTrendEmpty");
@@ -109,15 +125,18 @@ async function render(): Promise<void> {
   ]);
   const sessions = allSessions.filter((session) => session.date === today);
   const trends = getDashboardTrends(allSessions, today);
-  const grouped = groupSessions(sessions);
+  const grouped = groupSessions(sessions.filter((session) => !isBriefSession(session)));
   const totalMs = grouped.reduce((sum, item) => sum + item.durationMs, 0);
   const earlyExits = sessions.filter((session) => session.status === "early-exit").length;
+  const countedEvents = sessions.length - trends.briefTodayCount;
 
   if (summary) {
-    summary.textContent = sessions.length
-      ? `${formatDuration(totalMs)} logged across ${sessions.length} ${sessions.length === 1 ? "event" : "events"}${
+    summary.textContent = countedEvents
+      ? `${formatDuration(totalMs)} logged across ${countedEvents} ${countedEvents === 1 ? "event" : "events"}${
           earlyExits ? `, including ${earlyExits} early ${earlyExits === 1 ? "exit" : "exits"}` : ""
-        }.`
+        }${trends.briefTodayCount ? `, with ${trends.briefTodayCount} brief ${trends.briefTodayCount === 1 ? "visit" : "visits"} ignored` : ""}.`
+      : trends.briefTodayCount
+        ? `No time logged yet; ${trends.briefTodayCount} brief ${trends.briefTodayCount === 1 ? "visit was" : "visits were"} ignored.`
       : "No time logged yet.";
   }
 
@@ -129,6 +148,9 @@ async function render(): Promise<void> {
   table.hidden = grouped.length === 0;
   empty.hidden = grouped.length > 0;
   renderTrends(trends);
+  renderYesterdayRecap(trends.yesterday);
+  renderNotableChanges(trends.notableChanges);
+  renderCategoryTrends(trends.categories);
   renderWhitelist(whitelistedDomains);
   renderCategories(categories);
   renderAuthExemptions(authExemptions);
@@ -151,6 +173,14 @@ function renderTrends(trends: ReturnType<typeof getDashboardTrends>): void {
     weekTrend.textContent = formatTrend(trends.week, "previous 7 days");
   }
 
+  if (briefToday) {
+    briefToday.textContent = formatBriefCount(trends.briefTodayCount);
+  }
+
+  if (briefWeek) {
+    briefWeek.textContent = formatBriefCount(trends.briefWeekCount);
+  }
+
   if (!domainTrendRows || !domainTrendTable || !domainTrendEmpty) {
     return;
   }
@@ -158,6 +188,59 @@ function renderTrends(trends: ReturnType<typeof getDashboardTrends>): void {
   domainTrendRows.replaceChildren(...trends.domains.map(createDomainTrendRow));
   domainTrendTable.hidden = trends.domains.length === 0;
   domainTrendEmpty.hidden = trends.domains.length > 0;
+}
+
+function renderYesterdayRecap(recap: ReturnType<typeof getDashboardTrends>["yesterday"]): void {
+  if (!yesterdayRecap) {
+    return;
+  }
+
+  if (recap.sessionCount === 0 && recap.briefCount === 0) {
+    yesterdayRecap.textContent = "No recap available for yesterday.";
+    return;
+  }
+
+  const parts = [
+    `${formatDuration(recap.totalMs)} logged`,
+    `${recap.sessionCount} ${recap.sessionCount === 1 ? "event" : "events"}`
+  ];
+
+  if (recap.topDomain) {
+    parts.push(`top domain ${recap.topDomain}`);
+  }
+
+  if (recap.topCategory) {
+    parts.push(`top category ${recap.topCategory}`);
+  }
+
+  if (recap.earlyExits) {
+    parts.push(`${recap.earlyExits} early ${recap.earlyExits === 1 ? "exit" : "exits"}`);
+  }
+
+  if (recap.briefCount) {
+    parts.push(`${recap.briefCount} brief ${recap.briefCount === 1 ? "visit" : "visits"} ignored`);
+  }
+
+  yesterdayRecap.textContent = parts.join(" | ");
+}
+
+function renderNotableChanges(changes: NotableChange[]): void {
+  if (!notableList || !notableEmpty) {
+    return;
+  }
+
+  notableList.replaceChildren(...changes.map(createNotableChangeItem));
+  notableEmpty.hidden = changes.length > 0;
+}
+
+function renderCategoryTrends(categories: CategoryTrend[]): void {
+  if (!categoryTrendRows || !categoryTrendTable || !categoryTrendEmpty) {
+    return;
+  }
+
+  categoryTrendRows.replaceChildren(...categories.map(createCategoryTrendRow));
+  categoryTrendTable.hidden = categories.length === 0;
+  categoryTrendEmpty.hidden = categories.length > 0;
 }
 
 function groupSessions(sessions: FocusSession[]): GroupedSession[] {
@@ -235,6 +318,45 @@ function createDomainTrendRow(trend: DomainTrend): HTMLTableRowElement {
 
   row.append(domain, today, dayTrend, week, weekTrend, events);
   return row;
+}
+
+function createCategoryTrendRow(trend: CategoryTrend): HTMLTableRowElement {
+  const row = document.createElement("tr");
+  const category = document.createElement("td");
+  const today = document.createElement("td");
+  const dayTrend = document.createElement("td");
+  const week = document.createElement("td");
+  const weekTrend = document.createElement("td");
+  const events = document.createElement("td");
+
+  today.className = "time";
+  week.className = "time";
+  dayTrend.className = "trend";
+  weekTrend.className = "trend";
+
+  category.textContent = trend.category;
+  today.textContent = formatDuration(trend.todayMs);
+  dayTrend.textContent = formatTrend({ currentMs: trend.todayMs, previousMs: trend.yesterdayMs }, "yesterday");
+  week.textContent = formatDuration(trend.currentWeekMs);
+  weekTrend.textContent = formatTrend({ currentMs: trend.currentWeekMs, previousMs: trend.previousWeekMs }, "previous 7 days");
+  events.textContent = String(trend.todayCount);
+
+  row.append(category, today, dayTrend, week, weekTrend, events);
+  return row;
+}
+
+function createNotableChangeItem(change: NotableChange): HTMLLIElement {
+  const item = document.createElement("li");
+  const label = document.createElement("span");
+  const detail = document.createElement("strong");
+  const time = document.createElement("span");
+
+  label.textContent = change.label;
+  detail.textContent = change.detail;
+  time.textContent = formatSignedDuration(change.deltaMs);
+
+  item.append(label, detail, time);
+  return item;
 }
 
 function renderWhitelist(domains: string[]): void {
@@ -366,4 +488,14 @@ function formatTrend(metric: TrendMetric, label: string): string {
   const direction = deltaMs >= 0 ? "Up" : "Down";
   const percent = Math.round((Math.abs(deltaMs) / metric.previousMs) * 100);
   return `${direction} ${percent}% vs ${label}`;
+}
+
+function formatBriefCount(count: number): string {
+  const seconds = Math.round(BRIEF_SESSION_THRESHOLD_MS / 1000);
+  return count ? `${count} under ${seconds}s ignored` : `No visits under ${seconds}s`;
+}
+
+function formatSignedDuration(durationMs: number): string {
+  const sign = durationMs >= 0 ? "+" : "-";
+  return `${sign}${formatDuration(Math.abs(durationMs))}`;
 }
