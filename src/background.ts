@@ -1,6 +1,7 @@
 import {
   getActiveSession,
   getActiveSessionByDomain,
+  getActiveSessions,
   getCategories,
   getDefaultCategoryForDomain,
   getPendingPrompt,
@@ -16,7 +17,7 @@ import {
   toDateKey,
   updatePendingPrompt
 } from "./storage.js";
-import type { BackgroundMessage, FocusSession, PendingPrompt, PromptDetailsResponseMessage, PromptSubmitMessage } from "./types.js";
+import type { ActiveSession, BackgroundMessage, FocusSession, PendingPrompt, PromptDetailsResponseMessage, PromptSubmitMessage } from "./types.js";
 
 chrome.action.onClicked.addListener(() => {
   void chrome.tabs.create({ url: chrome.runtime.getURL("stats.html") });
@@ -48,6 +49,14 @@ chrome.webNavigation.onCompleted.addListener((details) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void finishSession(tabId, "closed");
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  void syncActiveTimer(activeInfo.tabId);
+});
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  void handleWindowFocusChanged(windowId);
 });
 
 chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
@@ -196,8 +205,8 @@ async function maybeStartSelectedSession(tabId: number, url: string): Promise<vo
   const category = pending.category?.trim() || "Other";
   const note = pending.note?.trim() ?? "";
   const purpose = note ? `${category}: ${note}` : category;
-
-  await setActiveSession({
+  const startedAt = Date.now();
+  const session: ActiveSession = {
     id: crypto.randomUUID(),
     tabId,
     domain,
@@ -205,8 +214,15 @@ async function maybeStartSelectedSession(tabId: number, url: string): Promise<vo
     category,
     note,
     status: "answered",
-    startedAt: Date.now()
-  });
+    startedAt,
+    durationMs: 0
+  };
+
+  if (await isTabActivelyFocused(tabId)) {
+    session.activeStartedAt = startedAt;
+  }
+
+  await setActiveSession(session);
 }
 
 async function recordEarlyExit(tabId: number): Promise<void> {
@@ -236,11 +252,12 @@ async function finishSession(tabId: number, reason: "closed" | "navigated"): Pro
   }
 
   const endedAt = Date.now();
+  const durationMs = getActiveDurationMs(session, endedAt);
   await saveSession({
     ...session,
     date: toDateKey(session.startedAt),
     endedAt,
-    durationMs: Math.max(0, endedAt - session.startedAt)
+    durationMs
   });
 }
 
@@ -271,6 +288,69 @@ async function saveEarlyExit(tabId: number, knownPending?: PendingPrompt): Promi
   }
 
   await saveSession(session);
+}
+
+async function handleWindowFocusChanged(windowId: number): Promise<void> {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    await syncActiveTimer();
+    return;
+  }
+
+  const tabs = await chrome.tabs.query({ active: true, windowId });
+  await syncActiveTimer(tabs[0]?.id);
+}
+
+async function syncActiveTimer(activeTabId?: number): Promise<void> {
+  const now = Date.now();
+  const sessions = await getActiveSessions();
+
+  for (const session of sessions) {
+    const shouldBeActive = session.tabId === activeTabId && (await isTabActivelyFocused(session.tabId));
+    const updated = shouldBeActive ? resumeActiveSession(session, now) : pauseActiveSession(session, now);
+
+    if (updated !== session) {
+      await setActiveSession(updated);
+    }
+  }
+}
+
+async function isTabActivelyFocused(tabId: number): Promise<boolean> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.active || tab.windowId === undefined) {
+      return false;
+    }
+
+    const window = await chrome.windows.get(tab.windowId);
+    return Boolean(window.focused);
+  } catch {
+    return false;
+  }
+}
+
+function resumeActiveSession(session: ActiveSession, now: number): ActiveSession {
+  if (session.activeStartedAt !== undefined) {
+    return session;
+  }
+
+  return { ...session, activeStartedAt: now };
+}
+
+function pauseActiveSession(session: ActiveSession, now: number): ActiveSession {
+  if (session.activeStartedAt === undefined) {
+    return session;
+  }
+
+  const { activeStartedAt, ...paused } = session;
+  return {
+    ...paused,
+    durationMs: getActiveDurationMs(session, now)
+  };
+}
+
+function getActiveDurationMs(session: ActiveSession, now: number): number {
+  const activeSpanMs = session.activeStartedAt === undefined ? 0 : Math.max(0, now - session.activeStartedAt);
+  return Math.max(0, session.durationMs + activeSpanMs);
 }
 
 async function closeAllUnknownSessions(): Promise<void> {

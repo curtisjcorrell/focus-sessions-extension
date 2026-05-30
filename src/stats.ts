@@ -6,6 +6,7 @@ import {
   clearTodaySessions,
   getAuthExemptions,
   getCategories,
+  getDailyRollups,
   getSessions,
   getWhitelistedDomains,
   removeAuthExemption,
@@ -469,8 +470,8 @@ function createAuthExemptionItem(exemption: string): HTMLLIElement {
 }
 
 async function exportSessions(): Promise<void> {
-  const sessions = await getSessions();
-  const blob = new Blob([JSON.stringify(sessions, null, 2)], { type: "application/json" });
+  const [sessions, dailyRollups] = await Promise.all([getSessions(), getDailyRollups()]);
+  const blob = new Blob([JSON.stringify({ sessions, dailyRollups }, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
 
