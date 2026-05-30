@@ -5,7 +5,7 @@ A minimal local Chrome extension for lightweight focus accountability.
 ## What It Does
 
 - Opens an extension-owned interstitial before normal HTTP/HTTPS sites so prompt input is not tied to the page being loaded.
-- Starts timing only after you choose a category and the destination site loads.
+- Starts timing only after you choose a category and the destination site loads, then counts time only while that tab is active in a focused Chrome window.
 - Logs tab sessions locally by domain, category, optional note, date, and duration.
 - Tracks zero-duration **Early Exit** events when you choose to leave a site instead.
 - Opens a dashboard tab from the extension toolbar button.
@@ -17,7 +17,9 @@ A minimal local Chrome extension for lightweight focus accountability.
 
 Focus Sessions does not use accounts, remote APIs, analytics services, or network requests.
 
-Completed records are stored in the local Chrome profile with `chrome.storage.local` under `focusSessions`. A record includes the domain, category, optional note, display purpose, status, date, timestamps, and duration. Active in-progress state is stored temporarily with `chrome.storage.session` under `activeFocusSessions` and `pendingFocusPrompts`.
+Completed records are stored in the local Chrome profile with `chrome.storage.local` under `focusSessions`. A record includes the domain, category, optional note, display purpose, status, date, timestamps, and active-tab duration. Raw records are retained for 90 days.
+
+Long-term daily summaries are stored locally under `focusDailyRollups`. Active in-progress state is stored temporarily with `chrome.storage.session` under `activeFocusSessions` and `pendingFocusPrompts`.
 
 Whitelisted domains are stored locally under `whitelistedDomains`. A whitelisted domain such as `example.com` also matches subdomains such as `docs.example.com`.
 

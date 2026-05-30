@@ -1,6 +1,7 @@
-import type { ActiveSession, FocusSession, PendingPrompt } from "./types.js";
+import type { ActiveSession, DailyRollup, DailyRollupBucket, FocusSession, PendingPrompt } from "./types.js";
 
 const SESSIONS_KEY = "focusSessions";
+const DAILY_ROLLUPS_KEY = "focusDailyRollups";
 const ACTIVE_SESSIONS_KEY = "activeFocusSessions";
 const PENDING_PROMPTS_KEY = "pendingFocusPrompts";
 const WHITELIST_KEY = "whitelistedDomains";
@@ -9,6 +10,7 @@ const CATEGORIES_KEY = "focusCategories";
 const DOMAIN_CATEGORY_DEFAULTS_KEY = "domainCategoryDefaults";
 const RETENTION_DAYS = 90;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const BRIEF_SESSION_THRESHOLD_MS = 10 * 1000;
 
 const DEFAULT_CATEGORIES = ["Work", "Research", "Communication", "Admin", "Shopping", "Entertainment", "Other"];
 const DEFAULT_AUTH_EXEMPTIONS = [
@@ -32,17 +34,35 @@ export async function saveSession(session: FocusSession): Promise<void> {
   const cutoff = Date.now() - RETENTION_DAYS * DAY_MS;
   const sessions = (await getSessions()).filter((item) => item.endedAt >= cutoff);
   sessions.push(session);
-  await chrome.storage.local.set({ [SESSIONS_KEY]: sessions });
+  const rollups = addSessionToRollups(await getDailyRollups(), session);
+  await chrome.storage.local.set({ [SESSIONS_KEY]: sessions, [DAILY_ROLLUPS_KEY]: rollups });
 }
 
 export async function clearAllSessions(): Promise<void> {
-  await chrome.storage.local.remove(SESSIONS_KEY);
+  await chrome.storage.local.remove([SESSIONS_KEY, DAILY_ROLLUPS_KEY]);
 }
 
 export async function clearTodaySessions(): Promise<void> {
   const today = toDateKey(Date.now());
   const sessions = (await getSessions()).filter((session) => session.date !== today);
-  await chrome.storage.local.set({ [SESSIONS_KEY]: sessions });
+  const rollups = await getDailyRollups();
+  delete rollups[today];
+  await chrome.storage.local.set({ [SESSIONS_KEY]: sessions, [DAILY_ROLLUPS_KEY]: rollups });
+}
+
+export async function getDailyRollups(): Promise<Record<string, DailyRollup>> {
+  const result = await chrome.storage.local.get(DAILY_ROLLUPS_KEY);
+  const rollups = result[DAILY_ROLLUPS_KEY];
+  if (isObject(rollups)) {
+    return rollups as Record<string, DailyRollup>;
+  }
+
+  const backfilled = buildDailyRollups(await getSessions());
+  if (Object.keys(backfilled).length > 0) {
+    await chrome.storage.local.set({ [DAILY_ROLLUPS_KEY]: backfilled });
+  }
+
+  return backfilled;
 }
 
 export function toDateKey(timestamp: number): string {
@@ -67,6 +87,11 @@ export async function getActiveSessionByDomain(domain: string): Promise<ActiveSe
 
 export async function setActiveSession(session: ActiveSession): Promise<void> {
   const sessions = await getSessionMap();
+  for (const [key, existing] of Object.entries(sessions)) {
+    if (existing.id === session.id && key !== String(session.tabId)) {
+      delete sessions[key];
+    }
+  }
   sessions[String(session.tabId)] = session;
   await chrome.storage.session.set({ [ACTIVE_SESSIONS_KEY]: sessions });
 }
@@ -252,7 +277,15 @@ export async function isAuthExemptUrl(url: string): Promise<boolean> {
 async function getSessionMap(): Promise<Record<string, ActiveSession>> {
   const result = await chrome.storage.session.get(ACTIVE_SESSIONS_KEY);
   const sessions = result[ACTIVE_SESSIONS_KEY];
-  return isObject(sessions) ? (sessions as Record<string, ActiveSession>) : {};
+  if (!isObject(sessions)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(sessions)
+      .filter((entry): entry is [string, Record<string, unknown>] => isObject(entry[1]))
+      .map(([tabId, session]) => [tabId, normalizeActiveSession(session)])
+  );
 }
 
 async function getPromptMap(): Promise<Record<string, PendingPrompt>> {
@@ -277,6 +310,81 @@ async function getDomainCategoryDefaults(): Promise<Record<string, string>> {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeActiveSession(session: Record<string, unknown>): ActiveSession {
+  const active = session as unknown as ActiveSession;
+  const normalized: ActiveSession = {
+    ...active,
+    durationMs: typeof session["durationMs"] === "number" ? session["durationMs"] : 0
+  };
+
+  if (typeof session["activeStartedAt"] === "number") {
+    normalized.activeStartedAt = session["activeStartedAt"];
+  }
+
+  return normalized;
+}
+
+function addSessionToRollups(rollups: Record<string, DailyRollup>, session: FocusSession): Record<string, DailyRollup> {
+  const date = session.date;
+  const category = session.category ?? getLegacyCategory(session);
+  const durationMs = Math.max(0, session.durationMs);
+  const isEarlyExit = session.status === "early-exit";
+  const isBrief = !isEarlyExit && durationMs > 0 && durationMs < BRIEF_SESSION_THRESHOLD_MS;
+  const rollup =
+    rollups[date] ??
+    {
+      date,
+      durationMs: 0,
+      sessions: 0,
+      earlyExits: 0,
+      briefSessions: 0,
+      byDomain: {},
+      byCategory: {}
+    };
+
+  rollup.sessions += 1;
+  rollup.durationMs += durationMs;
+
+  if (isEarlyExit) {
+    rollup.earlyExits += 1;
+  }
+
+  if (isBrief) {
+    rollup.briefSessions += 1;
+  }
+
+  addToBucket(rollup.byDomain, session.domain, durationMs, isEarlyExit);
+  addToBucket(rollup.byCategory, category, durationMs, isEarlyExit);
+
+  return { ...rollups, [date]: rollup };
+}
+
+function buildDailyRollups(sessions: FocusSession[]): Record<string, DailyRollup> {
+  return sessions.reduce<Record<string, DailyRollup>>((rollups, session) => addSessionToRollups(rollups, session), {});
+}
+
+function addToBucket(buckets: Record<string, DailyRollupBucket>, key: string, durationMs: number, isEarlyExit: boolean): void {
+  const bucket = buckets[key] ?? { durationMs: 0, sessions: 0, earlyExits: 0 };
+  bucket.durationMs += durationMs;
+  bucket.sessions += 1;
+  if (isEarlyExit) {
+    bucket.earlyExits += 1;
+  }
+  buckets[key] = bucket;
+}
+
+function getLegacyCategory(session: FocusSession): string {
+  if (session.category) {
+    return session.category;
+  }
+
+  if (session.status === "early-exit") {
+    return "Early Exit";
+  }
+
+  return session.purpose === "Unspecified" ? "Unspecified" : "Other";
 }
 
 function normalizeStringList(value: unknown, fallback: string[]): string[] {

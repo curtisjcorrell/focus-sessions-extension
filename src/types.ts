@@ -25,6 +25,24 @@ export interface ActiveSession {
   note?: string;
   status: PurposeStatus;
   startedAt: number;
+  durationMs: number;
+  activeStartedAt?: number;
+}
+
+export interface DailyRollupBucket {
+  durationMs: number;
+  sessions: number;
+  earlyExits: number;
+}
+
+export interface DailyRollup {
+  date: string;
+  durationMs: number;
+  sessions: number;
+  earlyExits: number;
+  briefSessions: number;
+  byDomain: Record<string, DailyRollupBucket>;
+  byCategory: Record<string, DailyRollupBucket>;
 }
 
 export interface PendingPrompt {
