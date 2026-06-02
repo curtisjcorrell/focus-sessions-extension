@@ -18,12 +18,10 @@ import {
   BRIEF_SESSION_THRESHOLD_MS,
   getDashboardTrends,
   isBriefSession,
-  type CategoryTrend,
-  type DomainTrend,
   type NotableChange,
   type TrendMetric
 } from "./analytics.js";
-import type { FocusSession } from "./types.js";
+import type { DailyRollup, DailyRollupBucket, FocusSession } from "./types.js";
 
 interface GroupedSession {
   domain: string;
@@ -34,10 +32,39 @@ interface GroupedSession {
   earlyExits: number;
 }
 
+interface BucketRow {
+  label: string;
+  durationMs: number;
+  sessions: number;
+  earlyExits: number;
+}
+
+interface ChartDay {
+  date: string;
+  totalMs: number;
+  categories: Record<string, DailyRollupBucket>;
+}
+
 const STORAGE_SESSION_NOTICE_THRESHOLD = 5000;
 const STORAGE_BYTES_NOTICE_THRESHOLD = 3 * 1024 * 1024;
+const CATEGORY_CHART_DAYS = 14;
+const FALLBACK_CHART_COLOR = "#2563eb";
+const CHART_COLORS = [FALLBACK_CHART_COLOR, "#16a34a", "#dc2626", "#9333ea", "#d97706", "#0891b2", "#be123c", "#4f46e5"];
 
 const summary = document.querySelector<HTMLParagraphElement>("#summary");
+const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab-button"));
+const tabPanels = Array.from(document.querySelectorAll<HTMLElement>(".tab-panel"));
+const analyticsDate = document.querySelector<HTMLInputElement>("#analyticsDate");
+const selectedDateSummary = document.querySelector<HTMLParagraphElement>("#selectedDateSummary");
+const selectedCategoryRows = document.querySelector<HTMLTableSectionElement>("#selectedCategoryRows");
+const selectedCategoryTable = document.querySelector<HTMLTableElement>("#selectedCategoryTable");
+const selectedCategoryEmpty = document.querySelector<HTMLDivElement>("#selectedCategoryEmpty");
+const selectedDomainRows = document.querySelector<HTMLTableSectionElement>("#selectedDomainRows");
+const selectedDomainTable = document.querySelector<HTMLTableElement>("#selectedDomainTable");
+const selectedDomainEmpty = document.querySelector<HTMLDivElement>("#selectedDomainEmpty");
+const categoryChart = document.querySelector<HTMLDivElement>("#categoryChart");
+const categoryChartEmpty = document.querySelector<HTMLDivElement>("#categoryChartEmpty");
+const categoryChartLegend = document.querySelector<HTMLDivElement>("#categoryChartLegend");
 const todayTotal = document.querySelector<HTMLDivElement>("#todayTotal");
 const todayTrend = document.querySelector<HTMLDivElement>("#todayTrend");
 const weekTotal = document.querySelector<HTMLDivElement>("#weekTotal");
@@ -50,12 +77,6 @@ const storageUsage = document.querySelector<HTMLDivElement>("#storageUsage");
 const storageNotice = document.querySelector<HTMLDivElement>("#storageNotice");
 const notableList = document.querySelector<HTMLUListElement>("#notableList");
 const notableEmpty = document.querySelector<HTMLDivElement>("#notableEmpty");
-const categoryTrendRows = document.querySelector<HTMLTableSectionElement>("#categoryTrendRows");
-const categoryTrendTable = document.querySelector<HTMLTableElement>("#categoryTrendTable");
-const categoryTrendEmpty = document.querySelector<HTMLDivElement>("#categoryTrendEmpty");
-const domainTrendRows = document.querySelector<HTMLTableSectionElement>("#domainTrendRows");
-const domainTrendTable = document.querySelector<HTMLTableElement>("#domainTrendTable");
-const domainTrendEmpty = document.querySelector<HTMLDivElement>("#domainTrendEmpty");
 const table = document.querySelector<HTMLTableElement>("#table");
 const rows = document.querySelector<HTMLTableSectionElement>("#rows");
 const empty = document.querySelector<HTMLDivElement>("#empty");
@@ -74,6 +95,19 @@ const authForm = document.querySelector<HTMLFormElement>("#authForm");
 const authInput = document.querySelector<HTMLInputElement>("#authInput");
 const authList = document.querySelector<HTMLUListElement>("#authList");
 const authEmpty = document.querySelector<HTMLDivElement>("#authEmpty");
+
+tabButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const tab = button.dataset.tab;
+    if (tab) {
+      activateTab(tab);
+    }
+  });
+});
+
+analyticsDate?.addEventListener("change", () => {
+  void render();
+});
 
 clearToday?.addEventListener("click", () => {
   void clearTodaySessions().then(render);
@@ -124,13 +158,16 @@ void render();
 
 async function render(): Promise<void> {
   const today = toDateKey(Date.now());
-  const [allSessions, whitelistedDomains, categories, authExemptions, storageBytes] = await Promise.all([
+  const yesterday = addDays(today, -1);
+  const [allSessions, dailyRollups, whitelistedDomains, categories, authExemptions, storageBytes] = await Promise.all([
     getSessions(),
+    getDailyRollups(),
     getWhitelistedDomains(),
     getCategories(),
     getAuthExemptions(),
     getLocalStorageBytesInUse()
   ]);
+  const selectedDate = getSelectedDate(yesterday);
   const sessions = allSessions.filter((session) => session.date === today);
   const trends = getDashboardTrends(allSessions, today);
   const grouped = groupSessions(sessions.filter((session) => !isBriefSession(session)));
@@ -155,14 +192,27 @@ async function render(): Promise<void> {
   rows.replaceChildren(...grouped.map(createRow));
   table.hidden = grouped.length === 0;
   empty.hidden = grouped.length > 0;
+  renderSelectedDate(dailyRollups, selectedDate);
+  renderCategoryChart(dailyRollups, selectedDate);
   renderTrends(trends);
   renderYesterdayRecap(trends.yesterday);
   renderStorageHealth(allSessions.length, storageBytes);
   renderNotableChanges(trends.notableChanges);
-  renderCategoryTrends(trends.categories);
   renderWhitelist(whitelistedDomains);
   renderCategories(categories);
   renderAuthExemptions(authExemptions);
+}
+
+function activateTab(tab: string): void {
+  tabButtons.forEach((button) => {
+    const active = button.dataset.tab === tab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+
+  tabPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.panel !== tab;
+  });
 }
 
 function renderStorageHealth(sessions: number, bytesInUse: number | null): void {
@@ -212,14 +262,6 @@ function renderTrends(trends: ReturnType<typeof getDashboardTrends>): void {
   if (briefWeek) {
     briefWeek.textContent = formatBriefCount(trends.briefWeekCount);
   }
-
-  if (!domainTrendRows || !domainTrendTable || !domainTrendEmpty) {
-    return;
-  }
-
-  domainTrendRows.replaceChildren(...trends.domains.map(createDomainTrendRow));
-  domainTrendTable.hidden = trends.domains.length === 0;
-  domainTrendEmpty.hidden = trends.domains.length > 0;
 }
 
 function renderYesterdayRecap(recap: ReturnType<typeof getDashboardTrends>["yesterday"]): void {
@@ -265,14 +307,72 @@ function renderNotableChanges(changes: NotableChange[]): void {
   notableEmpty.hidden = changes.length > 0;
 }
 
-function renderCategoryTrends(categories: CategoryTrend[]): void {
-  if (!categoryTrendRows || !categoryTrendTable || !categoryTrendEmpty) {
+function renderSelectedDate(rollups: Record<string, DailyRollup>, selectedDate: string): void {
+  const rollup = rollups[selectedDate];
+  const categoryRows = bucketRows(rollup?.byCategory ?? {});
+  const domainRows = bucketRows(rollup?.byDomain ?? {});
+
+  if (selectedDateSummary) {
+    selectedDateSummary.textContent = rollup
+      ? `${formatDateLabel(selectedDate)}: ${formatDuration(rollup.durationMs)} across ${rollup.sessions} ${
+          rollup.sessions === 1 ? "session" : "sessions"
+        }${rollup.earlyExits ? `, including ${rollup.earlyExits} early ${rollup.earlyExits === 1 ? "exit" : "exits"}` : ""}.`
+      : `${formatDateLabel(selectedDate)}: no time logged.`;
+  }
+
+  renderBucketTable(categoryRows, selectedCategoryRows, selectedCategoryTable, selectedCategoryEmpty);
+  renderBucketTable(domainRows, selectedDomainRows, selectedDomainTable, selectedDomainEmpty);
+}
+
+function renderBucketTable(
+  bucketRows: BucketRow[],
+  rowsElement: HTMLTableSectionElement | null,
+  tableElement: HTMLTableElement | null,
+  emptyElement: HTMLDivElement | null
+): void {
+  if (!rowsElement || !tableElement || !emptyElement) {
     return;
   }
 
-  categoryTrendRows.replaceChildren(...categories.map(createCategoryTrendRow));
-  categoryTrendTable.hidden = categories.length === 0;
-  categoryTrendEmpty.hidden = categories.length > 0;
+  rowsElement.replaceChildren(...bucketRows.map(createBucketRow));
+  tableElement.hidden = bucketRows.length === 0;
+  emptyElement.hidden = bucketRows.length > 0;
+}
+
+function renderCategoryChart(rollups: Record<string, DailyRollup>, selectedDate: string): void {
+  if (!categoryChart || !categoryChartEmpty || !categoryChartLegend) {
+    return;
+  }
+
+  const days = getChartDays(rollups, selectedDate);
+  const categories = getChartCategories(days);
+  const maxDurationMs = Math.max(...days.map((day) => day.totalMs), 0);
+
+  categoryChart.replaceChildren();
+  categoryChartLegend.replaceChildren();
+
+  if (categories.length === 0 || maxDurationMs === 0) {
+    categoryChart.hidden = true;
+    categoryChartEmpty.hidden = false;
+    return;
+  }
+
+  const colorMap = getCategoryColors(categories);
+  categoryChart.replaceChildren(...days.map((day) => createChartRow(day, categories, colorMap, maxDurationMs)));
+  categoryChartLegend.replaceChildren(...categories.map((category) => createLegendItem(category, colorMap.get(category) ?? FALLBACK_CHART_COLOR)));
+  categoryChart.hidden = false;
+  categoryChartEmpty.hidden = true;
+}
+
+function bucketRows(buckets: Record<string, DailyRollupBucket>): BucketRow[] {
+  return Object.entries(buckets)
+    .map(([label, bucket]) => ({
+      label,
+      durationMs: bucket.durationMs,
+      sessions: bucket.sessions,
+      earlyExits: bucket.earlyExits
+    }))
+    .sort((a, b) => b.durationMs - a.durationMs || b.sessions - a.sessions || a.label.localeCompare(b.label));
 }
 
 function groupSessions(sessions: FocusSession[]): GroupedSession[] {
@@ -325,56 +425,107 @@ function createRow(group: GroupedSession): HTMLTableRowElement {
   return row;
 }
 
-function createDomainTrendRow(trend: DomainTrend): HTMLTableRowElement {
+function createBucketRow(bucket: BucketRow): HTMLTableRowElement {
   const row = document.createElement("tr");
-  const domain = document.createElement("td");
-  const today = document.createElement("td");
-  const dayTrend = document.createElement("td");
-  const week = document.createElement("td");
-  const weekTrend = document.createElement("td");
-  const events = document.createElement("td");
+  const label = document.createElement("td");
+  const time = document.createElement("td");
+  const sessions = document.createElement("td");
+  const earlyExits = document.createElement("td");
 
-  today.className = "time";
-  week.className = "time";
-  dayTrend.className = "trend";
-  weekTrend.className = "trend";
+  time.className = "time";
+  label.textContent = bucket.label;
+  time.textContent = formatDuration(bucket.durationMs);
+  sessions.textContent = String(bucket.sessions);
+  earlyExits.textContent = bucket.earlyExits ? String(bucket.earlyExits) : "-";
 
-  domain.textContent = trend.domain;
-  today.textContent = formatDuration(trend.todayMs);
-  dayTrend.textContent = formatTrend({ currentMs: trend.todayMs, previousMs: trend.yesterdayMs }, "yesterday");
-  week.textContent = formatDuration(trend.currentWeekMs);
-  weekTrend.textContent = formatTrend({ currentMs: trend.currentWeekMs, previousMs: trend.previousWeekMs }, "previous 7 days");
-  events.textContent = trend.todayEarlyExits
-    ? `${trend.todayCount} (${trend.todayEarlyExits} exit${trend.todayEarlyExits === 1 ? "" : "s"})`
-    : String(trend.todayCount);
-
-  row.append(domain, today, dayTrend, week, weekTrend, events);
+  row.append(label, time, sessions, earlyExits);
   return row;
 }
 
-function createCategoryTrendRow(trend: CategoryTrend): HTMLTableRowElement {
-  const row = document.createElement("tr");
-  const category = document.createElement("td");
-  const today = document.createElement("td");
-  const dayTrend = document.createElement("td");
-  const week = document.createElement("td");
-  const weekTrend = document.createElement("td");
-  const events = document.createElement("td");
+function getSelectedDate(defaultDate: string): string {
+  if (!analyticsDate) {
+    return defaultDate;
+  }
 
-  today.className = "time";
-  week.className = "time";
-  dayTrend.className = "trend";
-  weekTrend.className = "trend";
+  if (!analyticsDate.value) {
+    analyticsDate.value = defaultDate;
+  }
 
-  category.textContent = trend.category;
-  today.textContent = formatDuration(trend.todayMs);
-  dayTrend.textContent = formatTrend({ currentMs: trend.todayMs, previousMs: trend.yesterdayMs }, "yesterday");
-  week.textContent = formatDuration(trend.currentWeekMs);
-  weekTrend.textContent = formatTrend({ currentMs: trend.currentWeekMs, previousMs: trend.previousWeekMs }, "previous 7 days");
-  events.textContent = String(trend.todayCount);
+  return analyticsDate.value;
+}
 
-  row.append(category, today, dayTrend, week, weekTrend, events);
+function getChartDays(rollups: Record<string, DailyRollup>, selectedDate: string): ChartDay[] {
+  return Array.from({ length: CATEGORY_CHART_DAYS }, (_, index) => {
+    const date = addDays(selectedDate, index - CATEGORY_CHART_DAYS + 1);
+    const rollup = rollups[date];
+    return {
+      date,
+      totalMs: rollup?.durationMs ?? 0,
+      categories: rollup?.byCategory ?? {}
+    };
+  });
+}
+
+function getChartCategories(days: ChartDay[]): string[] {
+  const totals = new Map<string, number>();
+
+  for (const day of days) {
+    for (const [category, bucket] of Object.entries(day.categories)) {
+      totals.set(category, (totals.get(category) ?? 0) + bucket.durationMs);
+    }
+  }
+
+  return [...totals.entries()]
+    .filter(([, durationMs]) => durationMs > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([category]) => category);
+}
+
+function getCategoryColors(categories: string[]): Map<string, string> {
+  return new Map(categories.map((category, index) => [category, CHART_COLORS[index % CHART_COLORS.length] ?? FALLBACK_CHART_COLOR]));
+}
+
+function createChartRow(day: ChartDay, categories: string[], colorMap: Map<string, string>, maxDurationMs: number): HTMLDivElement {
+  const row = document.createElement("div");
+  const label = document.createElement("span");
+  const bar = document.createElement("div");
+  const total = document.createElement("span");
+
+  row.className = "chart-row";
+  label.className = "chart-label";
+  bar.className = "chart-bar";
+  total.className = "chart-total";
+  label.textContent = formatShortDate(day.date);
+  total.textContent = day.totalMs > 0 ? formatDuration(day.totalMs) : "-";
+
+  bar.replaceChildren(...categories.map((category) => createChartSegment(category, day, colorMap, maxDurationMs)));
+  row.append(label, bar, total);
   return row;
+}
+
+function createChartSegment(category: string, day: ChartDay, colorMap: Map<string, string>, maxDurationMs: number): HTMLSpanElement {
+  const segment = document.createElement("span");
+  const durationMs = day.categories[category]?.durationMs ?? 0;
+
+  segment.className = "chart-segment";
+  segment.hidden = durationMs === 0;
+  segment.style.width = `${Math.max((durationMs / maxDurationMs) * 100, 0)}%`;
+  segment.style.background = colorMap.get(category) ?? FALLBACK_CHART_COLOR;
+  segment.title = `${category}: ${formatDuration(durationMs)}`;
+  return segment;
+}
+
+function createLegendItem(category: string, color: string): HTMLSpanElement {
+  const item = document.createElement("span");
+  const swatch = document.createElement("span");
+  const label = document.createElement("span");
+
+  item.className = "legend-item";
+  swatch.className = "legend-swatch";
+  swatch.style.background = color;
+  label.textContent = category;
+  item.append(swatch, label);
+  return item;
 }
 
 function createNotableChangeItem(change: NotableChange): HTMLLIElement {
@@ -530,6 +681,25 @@ function formatBriefCount(count: number): string {
 function formatSignedDuration(durationMs: number): string {
   const sign = durationMs >= 0 ? "+" : "-";
   return `${sign}${formatDuration(Math.abs(durationMs))}`;
+}
+
+function addDays(dateKey: string, offset: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  date.setDate(date.getDate() + offset);
+  return toDateKey(date.getTime());
+}
+
+function formatDateLabel(dateKey: string): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatShortDate(dateKey: string): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 async function getLocalStorageBytesInUse(): Promise<number | null> {
