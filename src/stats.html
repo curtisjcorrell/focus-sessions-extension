@@ -10,7 +10,7 @@
     <main class="shell">
       <header class="header">
         <div>
-          <h1>Today</h1>
+          <h1>Focus Sessions</h1>
           <p id="summary">No time logged yet.</p>
         </div>
         <div class="actions">
@@ -20,149 +20,177 @@
         </div>
       </header>
 
-      <section class="panel" aria-labelledby="whitelist-title">
-        <div class="section-header">
-          <div>
-            <h2 id="whitelist-title">Whitelisted domains</h2>
-            <p>Domains listed here will not show prompts or appear in analytics.</p>
+      <nav class="tabs" aria-label="Dashboard sections">
+        <button class="tab-button active" type="button" data-tab="analytics" aria-controls="analyticsPanel" aria-selected="true">Analytics</button>
+        <button class="tab-button" type="button" data-tab="management" aria-controls="managementPanel" aria-selected="false">Management</button>
+        <button class="tab-button" type="button" data-tab="data" aria-controls="dataPanel" aria-selected="false">Data</button>
+      </nav>
+
+      <div id="analyticsPanel" class="tab-panel" data-panel="analytics">
+        <section aria-labelledby="selected-day-title">
+          <div class="section-header">
+            <div>
+              <h2 id="selected-day-title">Daily analytics</h2>
+              <p id="selectedDateSummary">No time logged for the selected day.</p>
+            </div>
+            <label class="date-field">
+              <span>Date</span>
+              <input id="analyticsDate" type="date">
+            </label>
           </div>
-        </div>
-        <form id="whitelistForm" class="whitelist-form">
-          <input id="whitelistInput" type="text" placeholder="example.com" autocomplete="off">
-          <button type="submit">Add domain</button>
-        </form>
-        <div id="whitelistEmpty" class="empty small">No whitelisted domains yet.</div>
-        <ul id="whitelistList" class="whitelist-list"></ul>
-      </section>
-
-      <section class="panel" aria-labelledby="categories-title">
-        <div class="section-header">
-          <div>
-            <h2 id="categories-title">Prompt categories</h2>
-            <p>Categories shown on the interstitial prompt.</p>
+          <div class="split-grid">
+            <div>
+              <h2>Time by category</h2>
+              <div id="selectedCategoryEmpty" class="empty small">No category data for this day.</div>
+              <table id="selectedCategoryTable" hidden>
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Time</th>
+                    <th>Sessions</th>
+                    <th>Early exits</th>
+                  </tr>
+                </thead>
+                <tbody id="selectedCategoryRows"></tbody>
+              </table>
+            </div>
+            <div>
+              <h2>Time by domain</h2>
+              <div id="selectedDomainEmpty" class="empty small">No domain data for this day.</div>
+              <table id="selectedDomainTable" hidden>
+                <thead>
+                  <tr>
+                    <th>Domain</th>
+                    <th>Time</th>
+                    <th>Sessions</th>
+                    <th>Early exits</th>
+                  </tr>
+                </thead>
+                <tbody id="selectedDomainRows"></tbody>
+              </table>
+            </div>
           </div>
-        </div>
-        <form id="categoryForm" class="whitelist-form">
-          <input id="categoryInput" type="text" placeholder="Deep work" autocomplete="off">
-          <button type="submit">Add category</button>
-        </form>
-        <div id="categoryEmpty" class="empty small">No categories yet.</div>
-        <ul id="categoryList" class="whitelist-list"></ul>
-      </section>
+        </section>
 
-      <section class="panel" aria-labelledby="auth-title">
-        <div class="section-header">
-          <div>
-            <h2 id="auth-title">Auth exemptions</h2>
-            <p>Domains listed here pass through login flows without prompting or tracking.</p>
+        <section aria-labelledby="chart-title">
+          <h2 id="chart-title">Category trend</h2>
+          <div id="categoryChartEmpty" class="empty">No category rollups available yet.</div>
+          <div id="categoryChart" class="chart" hidden></div>
+          <div id="categoryChartLegend" class="chart-legend"></div>
+        </section>
+
+        <section aria-labelledby="trends-title">
+          <h2 id="trends-title">Current trends</h2>
+          <div class="metric-grid">
+            <article class="metric">
+              <span>Today</span>
+              <strong id="todayTotal">0s</strong>
+              <p id="todayTrend">No yesterday data</p>
+              <p id="briefToday">No visits under 10s</p>
+            </article>
+            <article class="metric">
+              <span>Last 7 days</span>
+              <strong id="weekTotal">0s</strong>
+              <p id="weekTrend">No previous 7 days data</p>
+              <p id="briefWeek">No visits under 10s</p>
+            </article>
           </div>
-        </div>
-        <form id="authForm" class="whitelist-form">
-          <input id="authInput" type="text" placeholder="accounts.example.com/login" autocomplete="off">
-          <button type="submit">Add auth domain</button>
-        </form>
-        <div id="authEmpty" class="empty small">No auth exemptions yet.</div>
-        <ul id="authList" class="whitelist-list"></ul>
-      </section>
+        </section>
 
-      <section aria-labelledby="trends-title">
-        <h2 id="trends-title">Trends</h2>
-        <div class="metric-grid">
-          <article class="metric">
-            <span>Today</span>
-            <strong id="todayTotal">0s</strong>
-            <p id="todayTrend">No yesterday data</p>
-            <p id="briefToday">No visits under 10s</p>
-          </article>
-          <article class="metric">
-            <span>Last 7 days</span>
-            <strong id="weekTotal">0s</strong>
-            <p id="weekTrend">No previous 7 days data</p>
-            <p id="briefWeek">No visits under 10s</p>
-          </article>
-        </div>
-      </section>
+        <section aria-labelledby="recap-title">
+          <h2 id="recap-title">Yesterday recap</h2>
+          <div id="yesterdayRecap" class="empty small">No recap available for yesterday.</div>
+        </section>
 
-      <section aria-labelledby="recap-title">
-        <h2 id="recap-title">Yesterday recap</h2>
-        <div id="yesterdayRecap" class="empty small">No recap available for yesterday.</div>
-      </section>
+        <section aria-labelledby="notable-title">
+          <h2 id="notable-title">Notable changes</h2>
+          <div id="notableEmpty" class="empty">No meaningful changes yet.</div>
+          <ul id="notableList" class="notable-list"></ul>
+        </section>
 
-      <section aria-labelledby="storage-title">
-        <h2 id="storage-title">Storage health</h2>
-        <div class="metric-grid">
-          <article class="metric">
-            <span>Retained sessions</span>
-            <strong id="sessionCount">0</strong>
-            <p>Raw records kept for recent detail views; daily rollups are retained separately</p>
-          </article>
-          <article class="metric">
-            <span>Local storage</span>
-            <strong id="storageUsage">0 KB</strong>
-            <p>Chrome profile storage used by this extension</p>
-          </article>
-        </div>
-        <div id="storageNotice" class="empty small storage-notice" hidden></div>
-      </section>
+        <section aria-labelledby="sessions-title">
+          <h2 id="sessions-title">Today by domain and purpose</h2>
+          <div id="empty" class="empty">Answer a site prompt, close the tab, then your session will appear here.</div>
+          <table id="table" hidden>
+            <thead>
+              <tr>
+                <th>Domain</th>
+                <th>Category</th>
+                <th>Purpose</th>
+                <th>Time</th>
+                <th>Sessions</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </section>
+      </div>
 
-      <section aria-labelledby="notable-title">
-        <h2 id="notable-title">Notable changes</h2>
-        <div id="notableEmpty" class="empty">No meaningful changes yet.</div>
-        <ul id="notableList" class="notable-list"></ul>
-      </section>
+      <div id="managementPanel" class="tab-panel" data-panel="management" hidden>
+        <section class="panel" aria-labelledby="whitelist-title">
+          <div class="section-header">
+            <div>
+              <h2 id="whitelist-title">Whitelisted domains</h2>
+              <p>Domains listed here will not show prompts or appear in analytics.</p>
+            </div>
+          </div>
+          <form id="whitelistForm" class="whitelist-form">
+            <input id="whitelistInput" type="text" placeholder="example.com" autocomplete="off">
+            <button type="submit">Add domain</button>
+          </form>
+          <div id="whitelistEmpty" class="empty small">No whitelisted domains yet.</div>
+          <ul id="whitelistList" class="whitelist-list"></ul>
+        </section>
 
-      <section aria-labelledby="category-trends-title">
-        <h2 id="category-trends-title">Time by category</h2>
-        <div id="categoryTrendEmpty" class="empty">No category trend data yet.</div>
-        <table id="categoryTrendTable" hidden>
-          <thead>
-            <tr>
-              <th>Category</th>
-              <th>Today</th>
-              <th>Day trend</th>
-              <th>7 days</th>
-              <th>Week trend</th>
-              <th>Today events</th>
-            </tr>
-          </thead>
-          <tbody id="categoryTrendRows"></tbody>
-        </table>
-      </section>
+        <section class="panel" aria-labelledby="categories-title">
+          <div class="section-header">
+            <div>
+              <h2 id="categories-title">Prompt categories</h2>
+              <p>Categories shown on the interstitial prompt.</p>
+            </div>
+          </div>
+          <form id="categoryForm" class="whitelist-form">
+            <input id="categoryInput" type="text" placeholder="Deep work" autocomplete="off">
+            <button type="submit">Add category</button>
+          </form>
+          <div id="categoryEmpty" class="empty small">No categories yet.</div>
+          <ul id="categoryList" class="whitelist-list"></ul>
+        </section>
 
-      <section aria-labelledby="domain-trends-title">
-        <h2 id="domain-trends-title">Daily summary by domain</h2>
-        <div id="domainTrendEmpty" class="empty">No domain trend data yet.</div>
-        <table id="domainTrendTable" hidden>
-          <thead>
-            <tr>
-              <th>Domain</th>
-              <th>Today</th>
-              <th>Day trend</th>
-              <th>7 days</th>
-              <th>Week trend</th>
-              <th>Today events</th>
-            </tr>
-          </thead>
-          <tbody id="domainTrendRows"></tbody>
-        </table>
-      </section>
+        <section class="panel" aria-labelledby="auth-title">
+          <div class="section-header">
+            <div>
+              <h2 id="auth-title">Auth exemptions</h2>
+              <p>Domains listed here pass through login flows without prompting or tracking.</p>
+            </div>
+          </div>
+          <form id="authForm" class="whitelist-form">
+            <input id="authInput" type="text" placeholder="accounts.example.com/login" autocomplete="off">
+            <button type="submit">Add auth domain</button>
+          </form>
+          <div id="authEmpty" class="empty small">No auth exemptions yet.</div>
+          <ul id="authList" class="whitelist-list"></ul>
+        </section>
+      </div>
 
-      <section aria-labelledby="sessions-title">
-        <h2 id="sessions-title">Sessions by domain and purpose</h2>
-        <div id="empty" class="empty">Answer a site prompt, close the tab, then your session will appear here.</div>
-        <table id="table" hidden>
-          <thead>
-            <tr>
-              <th>Domain</th>
-              <th>Category</th>
-              <th>Purpose</th>
-              <th>Time</th>
-              <th>Sessions</th>
-            </tr>
-          </thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </section>
+      <div id="dataPanel" class="tab-panel" data-panel="data" hidden>
+        <section aria-labelledby="storage-title">
+          <h2 id="storage-title">Storage health</h2>
+          <div class="metric-grid">
+            <article class="metric">
+              <span>Retained sessions</span>
+              <strong id="sessionCount">0</strong>
+              <p>Raw records kept for recent detail views; daily rollups are retained separately</p>
+            </article>
+            <article class="metric">
+              <span>Local storage</span>
+              <strong id="storageUsage">0 KB</strong>
+              <p>Chrome profile storage used by this extension</p>
+            </article>
+          </div>
+          <div id="storageNotice" class="empty small storage-notice" hidden></div>
+        </section>
+      </div>
     </main>
     <script type="module" src="stats.js"></script>
   </body>
